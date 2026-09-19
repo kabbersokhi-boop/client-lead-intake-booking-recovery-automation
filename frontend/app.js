@@ -1,10 +1,28 @@
 const form = document.querySelector("#enquiry-form");
 const status = document.querySelector("#form-status");
-const submitButton = form.querySelector("button");
+const submitButton = form.querySelector("button[type=submit]");
+const sampleLeadButton = document.querySelector("#sample-lead");
+const intakeResult = document.querySelector("#intake-result");
+const resultTitle = document.querySelector("#result-title");
+const resultIntakeState = document.querySelector("#result-intake-state");
+const resultCorrelationId = document.querySelector("#result-correlation-id");
+const resultCrmLeadId = document.querySelector("#result-crm-lead-id");
+const resultAiStatus = document.querySelector("#result-ai-status");
+const inspectTraceButton = document.querySelector("#inspect-trace");
 const traceForm = document.querySelector("#trace-form");
 const traceId = document.querySelector("#trace-id");
-const traceResult = document.querySelector("#trace-result");
+const traceSummary = document.querySelector("#trace-summary");
+const technicalDetails = document.querySelector("#technical-details");
+const traceRaw = document.querySelector("#trace-raw");
 const pendingStorageKey = "lead-intake-pending-v1";
+
+const sampleLead = {
+  full_name: "Maya Verma",
+  email: "maya.verma@example.com",
+  phone: "+1 604 555 0138",
+  message:
+    "Our furnace has stopped heating properly and it is around 15 years old. We are in Surrey and would prefer someone to visit Tuesday afternoon.",
+};
 
 function identifier() {
   return crypto.randomUUID();
@@ -30,6 +48,89 @@ function clearPending() {
 function requestError(body, fallback) {
   return body && typeof body.message === "string" ? body.message : fallback;
 }
+
+function renderVerifiedResult(body, payload) {
+  const view = window.LeadIntake.successView(body, payload);
+  if (!view) return false;
+  resultTitle.textContent = view.title;
+  resultIntakeState.textContent = view.intakeState;
+  resultCorrelationId.textContent = view.correlationId;
+  resultCrmLeadId.textContent = view.crmLeadId;
+  resultAiStatus.textContent = `AI: ${view.aiStatus}`;
+  intakeResult.hidden = false;
+  return true;
+}
+
+function appendTraceField(container, label, value) {
+  const item = document.createElement("div");
+  const term = document.createElement("dt");
+  const detail = document.createElement("dd");
+  term.textContent = label;
+  detail.textContent = value;
+  item.append(term, detail);
+  container.append(item);
+}
+
+function renderTrace(trace) {
+  const view = window.LeadIntake.traceView(trace);
+  traceSummary.replaceChildren();
+  technicalDetails.hidden = true;
+  traceRaw.textContent = "";
+  if (!view) throw new Error("The enquiry has not been persisted yet. Try again shortly.");
+
+  const overview = document.createElement("article");
+  overview.className = "trace-overview";
+  const heading = document.createElement("h3");
+  heading.textContent = view.customer;
+  const subtitle = document.createElement("p");
+  subtitle.textContent = "Persisted development CRM adapter record";
+  const fields = document.createElement("dl");
+  fields.className = "trace-grid";
+  [
+    ["Contact", view.contact],
+    ["Pipeline stage", view.pipelineStage],
+    ["Service type", view.serviceType],
+    ["Urgency", view.urgency],
+    ["Preferred time", view.preferredTime],
+    ["AI status", view.aiStatus],
+    ["Client received", view.clientReceivedAt],
+    ["Persisted", view.persistedAt],
+  ].forEach(([label, value]) => appendTraceField(fields, label, value));
+  overview.append(heading, subtitle, fields);
+
+  const auditHeading = document.createElement("h4");
+  auditHeading.className = "audit-heading";
+  auditHeading.textContent = `Audit events (${view.audits.length})`;
+  const audits = document.createElement("ul");
+  audits.className = "audit-list";
+  view.audits.forEach((event) => {
+    const item = document.createElement("li");
+    const label = document.createElement("strong");
+    const timestamp = document.createElement("span");
+    label.textContent = `${event.event_type || "event"} · ${event.status || "unknown"}`;
+    timestamp.textContent = event.created_at || "Timestamp unavailable";
+    item.append(label, timestamp);
+    audits.append(item);
+  });
+  overview.append(auditHeading, audits);
+  traceSummary.append(overview);
+  traceRaw.textContent = JSON.stringify(trace, null, 2);
+  technicalDetails.hidden = false;
+}
+
+sampleLeadButton.addEventListener("click", () => {
+  Object.entries(sampleLead).forEach(([field, value]) => {
+    form.elements[field].value = value;
+  });
+  status.className = "";
+  status.textContent = "Sample synthetic lead loaded. You can edit any field before submitting.";
+  form.elements.full_name.focus();
+});
+
+inspectTraceButton.addEventListener("click", () => {
+  traceForm.scrollIntoView({ behavior: "smooth", block: "start" });
+  traceId.focus();
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -76,13 +177,13 @@ form.addEventListener("submit", async (event) => {
     if (!response.ok) {
       throw new Error(requestError(body, "We could not accept your enquiry. Please try again."));
     }
-    if (!window.LeadIntake.verifiedSuccess(body, pending.payload)) {
+    if (!renderVerifiedResult(body, pending.payload)) {
       throw new Error(
         "We could not confirm that your enquiry was saved. Please retry using the same details.",
       );
     }
     status.className = "success";
-    status.textContent = `Enquiry received. Reference: ${body.correlation_id}`;
+    status.textContent = "The CRM response contract was verified.";
     traceId.value = body.correlation_id;
     clearPending();
     form.reset();
@@ -101,8 +202,8 @@ form.addEventListener("submit", async (event) => {
 
 traceForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  traceResult.className = "";
-  traceResult.textContent = "Loading persisted trace…";
+  traceSummary.className = "";
+  traceSummary.textContent = "Loading persisted trace…";
 
   try {
     const response = await window.LeadIntake.fetchWithTimeout(
@@ -112,19 +213,10 @@ traceForm.addEventListener("submit", async (event) => {
     );
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error("No trace was found for that correlation ID.");
-    if (!body.lead) throw new Error("The enquiry has not been persisted yet. Try again shortly.");
-    traceResult.className = "success";
-    traceResult.textContent = JSON.stringify(
-      {
-        correlation_id: body.correlation_id,
-        lead: body.lead,
-        audit_events: body.audit_events,
-      },
-      null,
-      2,
-    );
+    renderTrace(body);
   } catch (error) {
-    traceResult.className = "error";
-    traceResult.textContent = error.message || "The trace could not be retrieved.";
+    traceSummary.className = "error";
+    traceSummary.textContent = error.message || "The trace could not be retrieved.";
+    technicalDetails.hidden = true;
   }
 });

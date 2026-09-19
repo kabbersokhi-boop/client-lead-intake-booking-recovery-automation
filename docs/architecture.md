@@ -10,6 +10,18 @@
 | Development CRM adapter | Validates the n8n contract and persists the lead through a provider interface. It is not GoHighLevel. |
 | PostgreSQL | Stores source and server timestamps, lead data, and auditable safe provider metadata by correlation ID. |
 
+## Demonstration lead source
+
+The browser form is one controlled website lead source used to make the live
+demonstration repeatable during an interview. It is not presented as a complete
+home-services website or a production client deployment.
+
+In a real automation environment, source-specific adapters could map website
+forms, CRM-native forms, advertising lead forms, messaging channels, or other
+webhook/API sources into the same normalized internal lead contract before
+downstream orchestration. Those sources are not implemented or tested in Phase
+1.
+
 ## Verification trace
 
 After a successful submission, the browser displays the returned correlation ID and pre-fills the read-only trace lookup panel. `GET /api/traces/{correlation_id}` joins the persisted lead with its safe audit events so an interviewer can inspect what happened to one specific synthetic lead. This query does not mutate data and is intentionally separate from the intake workflow.

@@ -3,39 +3,97 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Home Service Consultation Request</title>
+    <title>Website Lead Intake | Automation Demo</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="shell">
-      <section class="intro">
-        <p class="eyebrow">Service enquiry</p>
-        <h1>Home Service Consultation Request</h1>
-        <p>Tell us what is happening and a service coordinator will review your enquiry.</p>
-      </section>
-      <section class="card">
-        <form id="enquiry-form" novalidate>
-          <label>Full Name<input name="full_name" autocomplete="name" maxlength="160" required /></label>
-          <label>Email<input name="email" type="email" autocomplete="email" maxlength="254" /></label>
-          <label>Phone<input name="phone" type="tel" autocomplete="tel" maxlength="50" /></label>
-          <label>Message<textarea name="message" rows="6" maxlength="5000" required></textarea></label>
-          <button type="submit">Submit Enquiry</button>
-          <p id="form-status" role="status" aria-live="polite"></p>
-        </form>
-      </section>
-      <section class="card trace-card" aria-labelledby="trace-title">
+      <header class="hero">
+        <p class="eyebrow">Live automation demo</p>
+        <div class="hero-heading">
+          <div>
+            <h1>Website Lead Intake</h1>
+            <p>
+              Create a synthetic customer enquiry and follow it through validation, AI
+              enrichment, CRM persistence and traceable audit history.
+            </p>
+          </div>
+          <p class="source-label">Demo source: Website enquiry</p>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <section class="explainer-card" aria-labelledby="after-submit-title">
+          <p class="eyebrow">Controlled demonstration</p>
+          <h2 id="after-submit-title">What happens after submit</h2>
+          <ol class="steps">
+            <li><span>1</span>n8n receives the webhook</li>
+            <li><span>2</span>Customer data is validated and normalized</li>
+            <li><span>3</span>NVIDIA NIM extracts structured service context</li>
+            <li><span>4</span>The development CRM adapter persists the lead</li>
+            <li><span>5</span>A correlation ID traces the complete intake</li>
+          </ol>
+          <div class="flow" aria-label="Automation flow">
+            <span>Website</span><b>→</b><span>n8n</span><b>→</b><span>AI enrichment</span><b>→</b><span>CRM</span><b>→</b><span>PostgreSQL</span>
+          </div>
+          <p class="fallback-note">
+            AI enrichment has a safe fallback; lead intake does not depend on AI availability.
+          </p>
+        </section>
+
+        <section class="form-card" aria-labelledby="form-title">
+          <div class="form-heading">
+            <div>
+              <p class="eyebrow">Synthetic enquiry</p>
+              <h2 id="form-title">Create a test lead</h2>
+            </div>
+            <button id="sample-lead" class="text-button" type="button">Use sample lead</button>
+          </div>
+          <form id="enquiry-form" novalidate>
+            <label>Full Name<input name="full_name" autocomplete="name" maxlength="160" required /></label>
+            <label>Email<input name="email" type="email" autocomplete="email" maxlength="254" /></label>
+            <label>Phone<input name="phone" type="tel" autocomplete="tel" maxlength="50" /></label>
+            <label>Message<textarea name="message" rows="6" maxlength="5000" required></textarea></label>
+            <button type="submit">Submit Test Lead</button>
+            <p id="form-status" role="status" aria-live="polite"></p>
+          </form>
+          <section id="intake-result" class="intake-result" aria-live="polite" hidden>
+            <div class="result-heading">
+              <div>
+                <p class="result-kicker">Verified result</p>
+                <h3 id="result-title">Lead accepted</h3>
+              </div>
+              <span id="result-ai-status" class="status-chip"></span>
+            </div>
+            <dl class="result-grid">
+              <div><dt>Intake state</dt><dd id="result-intake-state"></dd></div>
+              <div><dt>Correlation ID</dt><dd id="result-correlation-id" class="identifier"></dd></div>
+              <div><dt>CRM Lead ID</dt><dd id="result-crm-lead-id" class="identifier"></dd></div>
+            </dl>
+            <button id="inspect-trace" class="secondary" type="button">Inspect persisted trace</button>
+          </section>
+        </section>
+      </div>
+
+      <section class="trace-card" aria-labelledby="trace-title">
         <div class="trace-heading">
           <div>
             <p class="eyebrow">Verification</p>
-            <h2 id="trace-title">Trace a persisted enquiry</h2>
+            <h2 id="trace-title">Persisted lead trace</h2>
           </div>
-          <p>Use the correlation ID returned after submission to inspect the development CRM adapter.</p>
+          <p>Inspect the development CRM adapter record and safe audit history by correlation ID.</p>
         </div>
         <form id="trace-form" class="trace-form">
           <label>Correlation ID<input id="trace-id" name="correlation_id" autocomplete="off" required /></label>
-          <button type="submit" class="secondary">View persisted lead</button>
+          <button type="submit" class="secondary">Load trace</button>
         </form>
-        <pre id="trace-result" aria-live="polite"></pre>
+        <div id="trace-result" aria-live="polite">
+          <div id="trace-summary"></div>
+          <details id="technical-details" hidden>
+            <summary>Technical details</summary>
+            <pre id="trace-raw"></pre>
+          </details>
+        </div>
       </section>
     </main>
     <script src="/intake.js"></script>

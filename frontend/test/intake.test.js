@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { pendingFor, verifiedSuccess } = require("../intake.js");
+const { pendingFor, successView, traceView, verifiedSuccess } = require("../intake.js");
 
 const values = {
   full_name: "Maya Verma",
@@ -50,6 +50,37 @@ test("only the documented intake contract confirms browser success", () => {
     ...payload,
   };
   assert.equal(verifiedSuccess(valid, payload), true);
+  assert.deepEqual(successView(valid, payload), {
+    title: "Lead accepted",
+    intakeState: "created",
+    correlationId: payload.correlation_id,
+    crmLeadId: valid.crm_lead_id,
+    aiStatus: "enriched",
+  });
   assert.equal(verifiedSuccess({}, payload), false);
+  assert.equal(successView({}, payload), null);
   assert.equal(verifiedSuccess({ state: "accepted", ...payload }, payload), false);
+});
+
+test("trace view prioritizes useful persisted lead fields", () => {
+  const view = traceView({
+    lead: {
+      full_name: "Maya Verma",
+      email: "maya.verma@example.com",
+      phone: "+1 604 555 0138",
+      pipeline_stage: "new_lead",
+      service_type: "furnace_service",
+      urgency: "medium",
+      preferred_time: "Tuesday afternoon",
+      ai_status: "enriched",
+      client_received_at: "2026-09-19T00:00:00Z",
+      created_at: "2026-09-19T00:00:01Z",
+    },
+    audit_events: [{ event_type: "crm.lead_created", status: "success" }],
+  });
+
+  assert.equal(view.customer, "Maya Verma");
+  assert.equal(view.serviceType, "furnace_service");
+  assert.equal(view.audits.length, 1);
+  assert.equal(traceView({ lead: null }), null);
 });

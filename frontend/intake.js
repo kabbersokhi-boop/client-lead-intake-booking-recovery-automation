@@ -48,6 +48,34 @@
     );
   }
 
+  function successView(body, payload) {
+    if (!verifiedSuccess(body, payload)) return null;
+    return {
+      title: body.intake_state === "replayed" ? "Lead replayed safely" : "Lead accepted",
+      intakeState: body.intake_state,
+      correlationId: body.correlation_id,
+      crmLeadId: body.crm_lead_id,
+      aiStatus: body.ai_status,
+    };
+  }
+
+  function traceView(trace) {
+    if (!trace || !trace.lead || typeof trace.lead !== "object") return null;
+    const lead = trace.lead;
+    return {
+      customer: lead.full_name || "Not available",
+      contact: [lead.email, lead.phone].filter(Boolean).join(" · ") || "Not available",
+      pipelineStage: lead.pipeline_stage || "Not available",
+      serviceType: lead.service_type || "Not enriched",
+      urgency: lead.urgency || "Not enriched",
+      preferredTime: lead.preferred_time || "Not provided",
+      aiStatus: lead.ai_status || "Not available",
+      clientReceivedAt: lead.client_received_at || "Not available",
+      persistedAt: lead.created_at || "Not available",
+      audits: Array.isArray(trace.audit_events) ? trace.audit_events : [],
+    };
+  }
+
   async function fetchWithTimeout(url, options, timeoutMs) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -58,7 +86,15 @@
     }
   }
 
-  const api = { pendingFor, snapshot, sameSnapshot, verifiedSuccess, fetchWithTimeout };
+  const api = {
+    fetchWithTimeout,
+    pendingFor,
+    sameSnapshot,
+    snapshot,
+    successView,
+    traceView,
+    verifiedSuccess,
+  };
   if (typeof window !== "undefined") window.LeadIntake = api;
   if (typeof module !== "undefined") module.exports = api;
 })();
