@@ -8,10 +8,12 @@ const {
   bookingView,
   confirmationIsSettled,
   pendingFor,
+  queuedView,
   successView,
   traceView,
   verifiedBooking,
   verifiedSuccess,
+  verifiedQueued,
 } = require("../intake.js");
 
 const values = {
@@ -103,6 +105,37 @@ test("fallback AI outcomes keep verified intake success but use warning presenta
 
   assert.equal(view.title, "Lead accepted");
   assert.equal(view.aiStatusTone, "warning");
+});
+
+test("queued intake preserves identity without fabricating a CRM lead or enabling booking", () => {
+  const payload = {
+    submission_id: "09f70a8e-1304-42b9-a1e6-022d2daf4bd6",
+    correlation_id: "eeb1b11a-22c8-4a2f-a463-554246c14a16",
+  };
+  const queued = {
+    state: "received",
+    intake_state: "queued",
+    recovery_job_id: "d678189e-db40-46d7-89a5-4bca74dded23",
+    recovery_state: "pending",
+    ...payload,
+  };
+  assert.equal(verifiedQueued(queued, payload), true);
+  assert.equal(queuedView(queued, payload).title, "Enquiry received for processing");
+  assert.equal(verifiedSuccess(queued, payload), false);
+  assert.equal(verifiedQueued({ ...queued, crm_lead_id: queued.recovery_job_id }, payload), false);
+  assert.equal(beginIntakeAttempt().bookingPanelVisible, false);
+});
+
+test("pending trace is distinct from an old successful CRM card", () => {
+  const view = traceView({
+    lead: null,
+    recovery_jobs: [{ id: "job-id", state: "retry_wait" }],
+    audit_events: [],
+  });
+  assert.equal(view.pending, true);
+  assert.equal(view.pipelineStage, "not created");
+  assert.equal(view.recoveryState, "retry_wait");
+  assert.equal(traceView({ lead: null, recovery_jobs: [] }), null);
 });
 
 test("trace view prioritizes useful persisted lead fields", () => {

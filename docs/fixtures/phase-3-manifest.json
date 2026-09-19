@@ -1,0 +1,18 @@
+{
+  "run_id": "1d3cbbed-58c3-44c9-bc2d-a174be090585",
+  "description": "Controlled local fault-injection batch; all people and enquiries are fictional.",
+  "enquiries": [
+    {"submission_id":"cd2892e4-78aa-4ac6-8573-97c1b3e744e2","correlation_id":"331a8554-13f8-4e28-9eb4-634882f1be0d","full_name":"Avery Chen","email":"phase3.avery@example.com","phone":"+1 604 555 0201","message":"The furnace cycles off before the house warms. Surrey, weekday morning preferred."},
+    {"submission_id":"32751b5f-575e-417d-b135-035092193763","correlation_id":"55ba92af-5df1-40de-9676-7f2dd8396914","full_name":"Jordan Patel","email":"phase3.jordan@example.com","phone":"+1 604 555 0202","message":"A kitchen sink is draining slowly in Newton. Friday afternoon would work."},
+    {"submission_id":"f62f6131-f355-447c-994b-9ff974d527ef","correlation_id":"3039778e-40b0-4e57-8c5b-a809567dd76d","full_name":"Morgan Lee","email":"phase3.morgan@example.com","phone":"+1 604 555 0203","message":"The air conditioner makes a rattling noise. We are near Guildford."},
+    {"submission_id":"4e2c629f-dfc8-4d45-a60f-d668a71f0bf5","correlation_id":"70d92fb7-2ac3-4f71-87e7-b3b583b93cad","full_name":"Taylor Singh","email":"phase3.taylor@example.com","phone":"+1 604 555 0204","message":"Several basement outlets stopped working after a breaker trip."},
+    {"submission_id":"cebd1444-8eef-4bf6-9717-4cbfef205655","correlation_id":"9929d85d-203f-4846-8140-e1217eccab21","full_name":"Riley Kumar","email":"phase3.riley@example.com","phone":"+1 604 555 0205","message":"The water heater is leaking slowly at the base. Please inspect soon."},
+    {"submission_id":"565b6dbf-8559-4158-80e3-993cec2e86bd","correlation_id":"b5d6ac04-3bdf-44f3-882d-4abd089ec585","full_name":"Casey Brown","email":"phase3.casey@example.com","phone":"+1 604 555 0206","message":"Upstairs heating is uneven and two rooms stay cold."},
+    {"submission_id":"87ebffda-64d5-4f91-9f1c-bf25967df1fe","correlation_id":"d8355c48-38d1-4070-80ea-3c5526a1f309","full_name":"Jamie Wilson","email":"phase3.jamie@example.com","phone":"+1 604 555 0207","message":"The bathroom tap will not stop dripping. Evening availability preferred."},
+    {"submission_id":"6f7f1454-de20-4ca0-868d-0967bc6e15d2","correlation_id":"236169e3-7c3e-4243-8a94-251ac4f9869a","full_name":"Quinn Garcia","email":"phase3.quinn@example.com","phone":"+1 604 555 0208","message":"The heat pump is showing an intermittent fault code."},
+    {"submission_id":"3204d9d5-cffc-4e35-8f72-6221b264ec90","correlation_id":"72a50bf2-f2a0-4545-92aa-10d20e756534","full_name":"Skyler Martin","email":"phase3.skyler@example.com","phone":"+1 604 555 0209","message":"A dining room light flickers even after changing the bulb."},
+    {"submission_id":"8013a0de-c857-4ea9-9c31-0e17eafa1821","correlation_id":"f6e6d554-041f-4eb7-8d7e-1b31f0e59cab","full_name":"Reese Thompson","email":"phase3.reese@example.com","phone":"+1 604 555 0210","message":"The shower loses hot water after a few minutes."},
+    {"submission_id":"c44a0515-5a96-4398-8451-9858fcf7abf5","correlation_id":"2ce20d10-726a-414c-a561-ae96d93dc22a","full_name":"Cameron Davis","email":"phase3.cameron@example.com","phone":"+1 604 555 0211","message":"The furnace fan runs continuously even when heating is off."},
+    {"submission_id":"50daac04-aa23-4346-bb15-e687aa321ea1","correlation_id":"85bf0d2e-f7d1-4127-87a4-281d6167e029","full_name":"Alexis Moore","email":"phase3.alexis@example.com","phone":"+1 604 555 0212","message":"We need an inspection for a buzzing electrical panel."}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "id":"phase3-crm-recovery-error",
+  "name":"CRM Recovery Failure Recorder",
+  "nodes":[
+    {"parameters":{},"id":"error-trigger","name":"Workflow Error Trigger","type":"n8n-nodes-base.errorTrigger","typeVersion":1,"position":[0,200]},
+    {"parameters":{"jsCode":"const event = $json || {};\nconst execution = event.execution || {};\nconst workflow = event.workflow || {};\nconst error = execution.error || event.error || {};\nconst executionReference = execution.id ? String(execution.id) : null;\nconst workflowReference = workflow.id ? String(workflow.id) : (workflow.name || null);\nconst failedNode = execution.lastNodeExecuted || error.node?.name || null;\nconst eventKey = [workflowReference || 'unknown-workflow', executionReference || 'unknown-execution', failedNode || 'unknown-node'].join(':').slice(0,200);\nreturn [{json:{event_key:eventKey,job_id:null,correlation_id:null,workflow_reference:workflowReference,execution_reference:executionReference,failed_node:failedNode,error_class:String(error.name || error.httpCode || error.message || 'workflow_error').slice(0,80)}}];"},"id":"safe-context","name":"Extract Safe Error Context","type":"n8n-nodes-base.code","typeVersion":2,"position":[240,200]},
+    {"parameters":{"method":"POST","url":"={{ $env.CRM_ADAPTER_URL + '/api/recovery/incidents' }}","sendHeaders":true,"headerParameters":{"parameters":[{"name":"X-CRM-Adapter-Key","value":"={{ $env.CRM_ADAPTER_API_KEY }}"}]},"sendBody":true,"contentType":"json","specifyBody":"json","jsonBody":"={{ $json }}","options":{}},"id":"record","name":"Persist Recovery Incident","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[480,200]}
+  ],
+  "pinData":{},"connections":{"Workflow Error Trigger":{"main":[[{"node":"Extract Safe Error Context","type":"main","index":0}]]},"Extract Safe Error Context":{"main":[[{"node":"Persist Recovery Incident","type":"main","index":0}]]}},
+  "settings":{"executionOrder":"v1"},"active":false,"versionId":"00000000-0000-4000-8000-000000000033","meta":{"templateCredsSetupCompleted":true},"tags":[]
+}

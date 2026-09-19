@@ -1,0 +1,268 @@
+import uuid
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
+
+import pytest
+from fastapi import HTTPException
+from sqlalchemy import func, select
+from test_leads import payload
+
+from app.api.routes import _apply_fault_quota
+from app.config import settings
+from app.models import CRMFaultRun, CRMWriteAttempt, CRMWriteJob, Lead
+from app.schemas.lead import CRMLeadCreate
+from app.services.crm_service import DevelopmentCRMService
+from app.services.recovery_service import (
+    RecoveryConflictError,
+    RecoveryService,
+    StaleLeaseError,
+    retry_after_seconds,
+    retry_decision,
+)
+
+
+def validated_payload(**overrides):
+    return CRMLeadCreate.model_validate(payload(**overrides))
+
+
+def test_retry_after_supports_seconds_http_date_invalid_missing_and_long_delay():
+    now = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+    assert retry_after_seconds("12", now) == 12
+    assert retry_after_seconds(format_datetime(now + timedelta(seconds=31)), now) == 31
+    assert retry_after_seconds("not-a-delay", now) is None
+    assert retry_after_seconds(None, now) is None
+    assert retry_decision(429, 1, "7200", now).due_at == now + timedelta(hours=2)
+    assert retry_decision(429, 1, None, now).due_at == now + timedelta(
+        seconds=settings.crm_retry_fallback_seconds
+    )
+
+
+def test_retry_classification_and_exact_total_attempt_budget():
+    now = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+    assert retry_decision(400, 1, None, now).state == "needs_review"
+    assert retry_decision(401, 1, None, now).state == "blocked"
+    assert retry_decision(503, 1, None, now).state == "retry_wait"
+    assert retry_decision(None, 2, None, now).due_at == now + timedelta(
+        seconds=settings.crm_retry_fallback_seconds * 2
+    )
+    assert retry_decision(429, settings.crm_recovery_max_attempts, "10", now).state == (
+        "needs_review"
+    )
+
+
+def test_durable_admission_uniqueness_conflict_and_completed_reuse(db):
+    service = RecoveryService()
+    request = validated_payload()
+    first, created = service.admit(db, request)
+    replay, replay_created = service.admit(db, request)
+    assert created is True
+    assert replay_created is False
+    assert replay.id == first.id
+    assert db.scalar(select(func.count()).select_from(CRMWriteJob)) == 1
+
+    changed = validated_payload(
+        submission_id=str(request.submission_id),
+        correlation_id=str(request.correlation_id),
+        original_message="Different",
+        normalized_message="Different",
+    )
+    with pytest.raises(RecoveryConflictError):
+        service.admit(db, changed)
+
+    other = validated_payload(
+        submission_id=str(uuid.uuid4()), correlation_id=str(uuid.uuid4())
+    )
+    lead = DevelopmentCRMService().create_lead(db, other).lead
+    completed, _ = service.admit(db, other)
+    assert completed.state == "completed"
+    assert completed.completed_lead_id == lead.id
+
+
+def test_expired_lease_is_reclaimed_and_stale_worker_cannot_complete(db):
+    service = RecoveryService()
+    request = validated_payload()
+    job, _ = service.admit(db, request)
+    first = service.claim(db, "worker-one")
+    stale_token = first.lease_token
+    first.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.commit()
+    current = service.claim(db, "worker-two")
+    assert current.id == job.id
+    assert current.lease_token != stale_token
+    lead = DevelopmentCRMService().create_lead(db, request).lead
+    with pytest.raises(StaleLeaseError):
+        service.complete(db, job.id, stale_token, lead.id)
+    completed = service.complete(db, job.id, current.lease_token, lead.id)
+    assert completed.state == "completed"
+
+
+def test_attempt_history_retry_and_exhaustion_are_not_reset(db):
+    service = RecoveryService()
+    job, _ = service.admit(db, validated_payload())
+    now = datetime.now(timezone.utc)
+    for attempt_number in range(1, settings.crm_recovery_max_attempts + 1):
+        claimed = service.claim(db, f"worker-{attempt_number}", now=now)
+        attempt = service.start_attempt(db, job.id, claimed.lease_token, now=now)
+        assert attempt.attempt_number == attempt_number
+        job = service.fail(
+            db,
+            job.id,
+            claimed.lease_token,
+            503,
+            "transient",
+            "CRM temporarily unavailable",
+            None,
+            now=now,
+        )
+        if attempt_number < settings.crm_recovery_max_attempts:
+            assert job.state == "retry_wait"
+            job.due_at = now
+            db.commit()
+    assert job.state == "needs_review"
+    assert db.scalar(select(func.count()).select_from(CRMWriteAttempt)) == 4
+    service.requeue(db, job.id, now)
+    claimed = service.claim(db, "manual-worker", now=now)
+    manual_attempt = service.start_attempt(db, job.id, claimed.lease_token, now=now)
+    assert manual_attempt.attempt_number == 5
+    held = service.fail(
+        db,
+        job.id,
+        claimed.lease_token,
+        503,
+        "transient",
+        "Still unavailable",
+        None,
+        now=now,
+    )
+    assert held.state == "needs_review"
+    assert db.scalar(select(func.count()).select_from(CRMWriteAttempt)) == 5
+
+
+def test_committed_write_with_lost_ack_is_reconciled_without_duplicate(db):
+    service = RecoveryService()
+    request = validated_payload()
+    job, _ = service.admit(db, request)
+    lead = DevelopmentCRMService().create_lead(db, request).lead
+    claimed = service.claim(db, "reconciler")
+    completed = service.complete(db, job.id, claimed.lease_token, lead.id)
+    assert completed.completed_lead_id == lead.id
+    assert db.scalar(select(func.count()).select_from(Lead)) == 1
+    assert db.scalar(select(func.count()).select_from(CRMWriteAttempt)) == 0
+
+
+def test_incident_is_deduplicated_and_only_resolution_by_verified_completion(db):
+    service = RecoveryService()
+    request = validated_payload()
+    job, _ = service.admit(db, request)
+    values = {
+        "event_key": "workflow:execution:node",
+        "job_id": job.id,
+        "correlation_id": job.correlation_id,
+        "workflow_reference": "diagnostic",
+        "execution_reference": "123",
+        "failed_node": "Create CRM Lead",
+        "error_class": "http_429",
+    }
+    incident, created = service.record_incident(db, **values)
+    duplicate, duplicate_created = service.record_incident(db, **values)
+    assert created is True
+    assert duplicate_created is False
+    assert duplicate.id == incident.id
+    assert incident.state == "open"
+    lead = DevelopmentCRMService().create_lead(db, request).lead
+    claimed = service.claim(db, "reconciler")
+    service.complete(db, job.id, claimed.lease_token, lead.id)
+    db.refresh(incident)
+    assert incident.state == "resolved"
+    assert incident.resolved_at is not None
+
+
+def test_fault_controls_are_authenticated_disabled_and_batch_scoped(client, db):
+    run_id = str(uuid.uuid4())
+    scoped = str(uuid.uuid4())
+    unscoped = str(uuid.uuid4())
+    unauthorized = client.post(
+        "/api/recovery/fault-runs",
+        headers={"X-CRM-Adapter-Key": "wrong"},
+        json={"run_id": run_id, "submission_ids": [scoped]},
+    )
+    assert unauthorized.status_code == 401
+    created = client.post(
+        "/api/recovery/fault-runs",
+        json={"run_id": run_id, "submission_ids": [scoped]},
+    )
+    assert created.status_code == 200
+    assert created.json()["active"] is False
+    _apply_fault_quota(db, uuid.UUID(unscoped))
+
+
+def test_fixed_window_fault_returns_real_retry_after_before_write(db):
+    submission_id = uuid.uuid4()
+    run = CRMFaultRun(
+        run_id=uuid.uuid4(),
+        submission_ids=[str(submission_id)],
+        active=True,
+        hold_delivery=False,
+        request_limit=2,
+        window_seconds=10,
+    )
+    db.add(run)
+    db.commit()
+    _apply_fault_quota(db, submission_id)
+    _apply_fault_quota(db, submission_id)
+    with pytest.raises(HTTPException) as caught:
+        _apply_fault_quota(db, submission_id)
+    assert caught.value.status_code == 429
+    assert int(caught.value.headers["Retry-After"]) >= 1
+
+
+def test_fault_rejection_records_actual_attempt_and_execution_reference(db):
+    service = RecoveryService()
+    request = validated_payload()
+    job, _ = service.admit(db, request)
+    run = CRMFaultRun(
+        run_id=uuid.uuid4(),
+        submission_ids=[str(request.submission_id)],
+        active=True,
+        hold_delivery=False,
+        request_limit=1,
+        window_seconds=10,
+    )
+    db.add(run)
+    db.commit()
+    _apply_fault_quota(db, request.submission_id, "diagnostic-123")
+    with pytest.raises(HTTPException):
+        _apply_fault_quota(db, request.submission_id, "diagnostic-123")
+    db.refresh(job)
+    attempt = db.scalar(select(CRMWriteAttempt).where(CRMWriteAttempt.job_id == job.id))
+    assert job.state == "retry_wait"
+    assert job.attempt_count == 1
+    assert attempt.status_code == 429
+    assert attempt.execution_reference == "diagnostic-123"
+
+
+def test_recovery_endpoints_require_auth(client):
+    identifier = "00000000-0000-4000-8000-000000000000"
+    for method, path in [
+        ("post", "/api/recovery/jobs/claim"),
+        ("post", f"/api/recovery/jobs/{identifier}/requeue"),
+        ("get", "/api/recovery/jobs"),
+        ("get", f"/api/crm/leads/by-submission/{identifier}"),
+    ]:
+        response = client.request(
+            method,
+            path,
+            headers={"X-CRM-Adapter-Key": "wrong"},
+            json={"worker_id": "test"} if path.endswith("claim") else None,
+        )
+        assert response.status_code == 401
+
+
+def test_pending_trace_exists_before_lead_and_never_exposes_payload(client):
+    request = payload()
+    admitted = client.post("/api/recovery/jobs", json={"payload": request})
+    assert admitted.status_code == 201
+    trace = client.get(f"/api/traces/{request['correlation_id']}").json()
+    assert trace["lead"] is None
+    assert trace["recovery_jobs"][0]["state"] == "pending"
+    assert "payload_json" not in trace["recovery_jobs"][0]

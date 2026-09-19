@@ -88,6 +88,13 @@ test("exported CRM acknowledgement code rejects an unexpected 2xx shape", () => 
   assert.equal(result.status_code, 502);
 });
 
+test("exported CRM acknowledgement safely rejects null, arrays, and primitives", () => {
+  for (const value of [null, [], "ok", 1, true]) {
+    const result = buildIntakeResult(value);
+    assert.equal(result.status_code, 502);
+  }
+});
+
 function buildIntakeResult(crm, expectedOverrides = {}) {
   return runCode(
     "Build Intake Result",
@@ -125,6 +132,21 @@ test("intake acknowledgement separates created and replayed lifecycle invariants
   assert.equal(booked.status_code, 200);
 });
 
+test("intake acknowledgement accepts only identity-bound queued receipts without a CRM id", () => {
+  const queued = buildIntakeResult({
+    state: "received",
+    intake_state: "queued",
+    recovery_job_id: "d678189e-db40-46d7-89a5-4bca74dded23",
+    recovery_state: "retry_wait",
+    submission_id: lead.submission_id,
+    correlation_id: lead.correlation_id,
+  });
+  assert.equal(queued.status_code, 202);
+  assert.equal(queued.response_body.crm_lead_id, undefined);
+  assert.equal(buildIntakeResult({ ...queued.response_body, correlation_id: "wrong" }).status_code, 502);
+  assert.equal(buildIntakeResult({ ...queued.response_body, crm_lead_id: queued.response_body.recovery_job_id }).status_code, 502);
+});
+
 test("intake replay trusts persisted AI state and permits a legacy missing follow-up", () => {
   const replay = buildIntakeResult(
     {
@@ -141,6 +163,19 @@ test("intake replay trusts persisted AI state and permits a legacy missing follo
   );
   assert.equal(replay.status_code, 200);
   assert.equal(replay.response_body.ai_status, "fallback_invalid");
+});
+
+test("intake replay rejects lifecycle combinations the browser rejects", () => {
+  const base = {
+    crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",
+    submission_id: lead.submission_id,
+    correlation_id: lead.correlation_id,
+    intake_state: "replayed",
+    ai_status: "enriched",
+    follow_up_due_at: "2026-09-19T00:02:00Z",
+  };
+  assert.equal(buildIntakeResult({ ...base, pipeline_stage: "new_lead", follow_up_status: "sent" }).status_code, 502);
+  assert.equal(buildIntakeResult({ ...base, pipeline_stage: "new_lead", follow_up_status: "cancelled" }).status_code, 502);
 });
 
 const bookingWorkflow = require("../appointment-booking.json");

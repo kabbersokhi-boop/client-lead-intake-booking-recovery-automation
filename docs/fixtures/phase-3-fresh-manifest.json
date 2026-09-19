@@ -1,0 +1,12 @@
+{
+  "run_id": "f34edebe-7615-42c8-a795-bf3687a7babd",
+  "description": "Fresh-work acceptance run exceeding one five-request quota window; all data is fictional.",
+  "enquiries": [
+    {"submission_id":"cf081606-2c13-4eb8-9b49-bf6198a7dcbb","correlation_id":"22110953-6f40-405a-b68a-e96de3c352e1","full_name":"Rowan Hall","email":"phase3.fresh.rowan@example.com","phone":"+1 604 555 0231","message":"The furnace thermostat is blank after a power interruption."},
+    {"submission_id":"de2ce391-80e4-4178-b046-8b0455ffdfa0","correlation_id":"0e499078-13ef-4de7-8716-2376b3e9f6aa","full_name":"Emerson Young","email":"phase3.fresh.emerson@example.com","phone":"+1 604 555 0232","message":"A laundry drain backs up during the rinse cycle."},
+    {"submission_id":"8aa314b1-7df5-45f2-a016-ec4652291fd6","correlation_id":"9600f44b-b100-45c4-998a-a90d08167353","full_name":"Dakota King","email":"phase3.fresh.dakota@example.com","phone":"+1 604 555 0233","message":"The heat pump outdoor unit is unusually loud."},
+    {"submission_id":"6f6f8590-12f5-460f-8a5d-4cee82f9f486","correlation_id":"1cf1f961-e16c-4a9f-9c98-39e59938b6c9","full_name":"Finley Scott","email":"phase3.fresh.finley@example.com","phone":"+1 604 555 0234","message":"Two kitchen outlets have no power."},
+    {"submission_id":"2fd9a624-10fe-44ad-9c09-a54711b0fc40","correlation_id":"56a723d3-08a1-4d14-99fc-cec01da8df09","full_name":"Harper Green","email":"phase3.fresh.harper@example.com","phone":"+1 604 555 0235","message":"The hot water temperature changes without warning."},
+    {"submission_id":"014bc3b7-52de-4c74-a785-5365e32ab821","correlation_id":"f1790942-dff6-482b-b1cf-286eafd26f4f","full_name":"Parker Adams","email":"phase3.fresh.parker@example.com","phone":"+1 604 555 0236","message":"The furnace makes a scraping noise when the fan starts."}
+  ]
+}

@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     smtp_host: str = "mailpit"
     smtp_port: int = 1025
     development_email_from: str = "automation-demo@example.test"
+    crm_recovery_max_attempts: int = 4
+    crm_recovery_lease_seconds: int = 30
+    crm_retry_fallback_seconds: int = 10
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

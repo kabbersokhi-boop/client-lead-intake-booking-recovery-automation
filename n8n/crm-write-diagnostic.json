@@ -1,0 +1,13 @@
+{
+  "id":"phase3-crm-write-diagnostic",
+  "name":"Controlled CRM Rate-Limit Diagnostic",
+  "nodes":[
+    {"parameters":{"httpMethod":"POST","path":"controlled-crm-rate-limit-diagnostic","responseMode":"lastNode","options":{}},"id":"webhook","name":"Diagnostic Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,200],"webhookId":"9fc31e8e-79df-4b32-932d-c554ad528027"},
+    {"parameters":{"jsCode":"const body = $json.body ?? $json;\nif (!body || !Array.isArray(body.jobs) || body.jobs.length < 1 || body.jobs.length > 50) throw new Error('Expected a bounded jobs array.');\nreturn body.jobs.map((payload) => ({json:{payload}}));"},"id":"batch","name":"Validate Prepared Backlog","type":"n8n-nodes-base.code","typeVersion":2,"position":[240,200]},
+    {"parameters":{"method":"POST","url":"={{ $env.CRM_ADAPTER_URL + '/api/crm/leads' }}","sendHeaders":true,"headerParameters":{"parameters":[{"name":"X-CRM-Adapter-Key","value":"={{ $env.CRM_ADAPTER_API_KEY }}"},{"name":"X-N8N-Execution-Reference","value":"={{ String($execution.id) }}"}]},"sendBody":true,"contentType":"json","specifyBody":"json","jsonBody":"={{ $json.payload }}","options":{"timeout":"={{ Number($env.CRM_ADAPTER_TIMEOUT_MS || 6000) }}"}},"id":"write","name":"Diagnostic CRM Write Without Recovery","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[480,200]},
+    {"parameters":{"jsCode":"return [{json:{completed_items:$input.all().length,execution_reference:String($execution.id)}}];"},"id":"summary","name":"Diagnostic Summary","type":"n8n-nodes-base.code","typeVersion":2,"position":[720,200]}
+  ],
+  "pinData":{},
+  "connections":{"Diagnostic Webhook":{"main":[[{"node":"Validate Prepared Backlog","type":"main","index":0}]]},"Validate Prepared Backlog":{"main":[[{"node":"Diagnostic CRM Write Without Recovery","type":"main","index":0}]]},"Diagnostic CRM Write Without Recovery":{"main":[[{"node":"Diagnostic Summary","type":"main","index":0}]]}},
+  "settings":{"executionOrder":"v1","errorWorkflow":"phase3-crm-recovery-error"},"active":false,"versionId":"00000000-0000-4000-8000-000000000032","meta":{"templateCredsSetupCompleted":true},"tags":[]
+}

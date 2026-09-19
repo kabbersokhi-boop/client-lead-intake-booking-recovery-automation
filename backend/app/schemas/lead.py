@@ -188,3 +188,5 @@ class TraceResponse(BaseModel):
     follow_ups: list[FollowUpResponse]
     appointments: list[AppointmentResponse]
     audit_events: list[AuditEventResponse]
+    recovery_jobs: list[dict] = Field(default_factory=list)
+    recovery_incidents: list[dict] = Field(default_factory=list)

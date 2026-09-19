@@ -130,6 +130,24 @@ function renderVerifiedResult(body, payload) {
   return true;
 }
 
+function renderQueuedResult(body, payload) {
+  const view = window.LeadIntake.queuedView(body, payload);
+  if (!view) return false;
+  resultTitle.textContent = view.title;
+  resultIntakeState.textContent = view.intakeState;
+  resultCorrelationId.textContent = view.correlationId;
+  resultCrmLeadId.textContent = "Pending — no CRM lead exists yet";
+  resultPipelineStage.textContent = "not created";
+  resultFollowUpStatus.textContent = "not scheduled";
+  resultFollowUpDue.textContent = "Not applicable";
+  resultAiStatus.textContent = `Recovery: ${view.recoveryState}`;
+  resultAiStatus.className = "status-chip status-chip--warning";
+  intakeResult.hidden = false;
+  bookingPanel.hidden = true;
+  acceptedLead = null;
+  return true;
+}
+
 function appendTraceField(container, label, value) {
   const item = document.createElement("div");
   const term = document.createElement("dt");
@@ -172,6 +190,8 @@ function renderTrace(trace) {
     ["Appointment ID", view.appointmentId],
     ["Appointment time", formatBusinessTime(view.appointmentAt, view.appointmentTimezone)],
     ["Confirmation sent", formatBusinessTime(view.confirmationSentAt)],
+    ["Recovery state", view.recoveryState],
+    ["Recovery job", view.recoveryJobId],
   ].forEach(([label, value]) => appendTraceField(fields, label, value));
   overview.append(heading, subtitle, fields);
 
@@ -334,16 +354,22 @@ form.addEventListener("submit", async (event) => {
     if (!response.ok) {
       throw new Error(requestError(body, "We could not accept your enquiry. Please try again."));
     }
-    if (!renderVerifiedResult(body, pending.payload)) {
+    const created = renderVerifiedResult(body, pending.payload);
+    const queued = !created && renderQueuedResult(body, pending.payload);
+    if (!created && !queued) {
       throw new Error(
         "We could not confirm that your enquiry was saved. Please retry using the same details.",
       );
     }
-    status.className = "success";
-    status.textContent = "The CRM response contract was verified.";
+    status.className = created ? "success" : "";
+    status.textContent = created
+      ? "The CRM response contract was verified."
+      : "Your enquiry is durably queued. Refresh its trace before booking.";
     traceId.value = body.correlation_id;
-    clearPending();
-    form.reset();
+    if (created) {
+      clearPending();
+      form.reset();
+    }
   } catch (error) {
     status.className = "error";
     if (error.name === "AbortError") {

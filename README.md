@@ -2,7 +2,7 @@
 
 A fresh technical-interview capability demonstration for an end-to-end enquiry and booking lifecycle. All example data is synthetic. This is not a production client deployment and does not use a fictional product or client brand.
 
-> Current scope: Phase 1 intake plus Phase 2 lifecycle and booking. Recovery engineering, Make.com, WhatsApp, real calendar/email providers, and a GoHighLevel integration are not implemented. The CRM boundary remains an explicit development adapter.
+> Current scope: Phase 1 intake, Phase 2 lifecycle/booking, and Phase 3 bounded CRM-write recovery. Make, WhatsApp, real calendar/email providers, and a vendor CRM integration are not implemented. The CRM boundary remains an explicit development adapter.
 
 ## Architecture
 
@@ -17,7 +17,7 @@ NVIDIA NIM Enrichment
         ↓
 FastAPI CRM Integration Boundary
         ↓
-PostgreSQL + Pending Follow-up
+PostgreSQL Durable CRM Job + Lead + Pending Follow-up
         ↓
  n8n Follow-up or Booking Workflow
         ↓
@@ -29,6 +29,8 @@ PostgreSQL + Pending Follow-up
 - NVIDIA NIM is used only to extract service context from the original message; it cannot establish availability, bookings, prices, CRM state, or contact details.
 - The FastAPI **development CRM adapter** is a small persistence boundary, not GoHighLevel. `DevelopmentCRMProvider` and the future `GoHighLevelCRMProvider` contract keep n8n independent of the eventual CRM vendor.
 - PostgreSQL stores leads, follow-ups, appointments, source and persistence timestamps, and safe audit metadata keyed by correlation ID. Email-capable leads receive one configurable pending follow-up; phone-only leads do not schedule unsupported email work.
+- Every validated lead write is persisted before delivery. Confirmed writes remain `201`/`200`; unfinished durable work returns `202 queued` without a fabricated CRM ID or booking access.
+- Recovery claims one due job with a lease, reconciles by stable submission identity, obtains shared quota permission, and then completes, retries, blocks, or holds the job for review. Four total automatic writes are allowed by default; manual requeue authorizes one additional operator attempt without deleting history.
 - The booking operation atomically creates one active appointment per lead, moves the pipeline to `appointment_booked`, and cancels a still-pending follow-up. A repeated `booking_request_id` returns the same appointment; a different booking for that lead returns a controlled conflict.
 - Mailpit is a local development SMTP sink, not a real customer email provider. The actual path is n8n HTTP orchestration → FastAPI development email gateway → SMTP → Mailpit; the public workflows do not use a native n8n SMTP node.
 
@@ -56,11 +58,15 @@ PostgreSQL + Pending Follow-up
 
    When n8n is a separate Docker container, attach it to the Compose network and use `http://backend:8000`; this preserves private container-to-container access while both editor and browser-facing backend stay loopback-bound. The CRM write endpoint requires `X-CRM-Adapter-Key`; the workflow supplies it from n8n runtime configuration. The workflow returns CORS headers for `http://localhost:18000` and the browser uses JSON requests with a 30-second configurable acknowledgement timeout.
 
-4. Import and activate the three sanitized workflows:
+4. Import and activate the sanitized workflows:
 
    - `n8n/lead-intake.json`
    - `n8n/appointment-booking.json`
    - `n8n/follow-up-dispatch.json`
+   - `n8n/crm-recovery-error.json`
+   - `n8n/crm-write-recovery.json`
+
+   Keep `n8n/crm-write-diagnostic.json` disabled except during the controlled local fault test. Diagnostic and recovery use `phase3-crm-recovery-error` as their error workflow; exports contain this stable local link and no credentials.
 
    Put the two production webhook URLs in `N8N_WEBHOOK_URL` and `N8N_BOOKING_WEBHOOK_URL`. The workflow exports contain no secrets or credential references. The dispatcher checks every minute; `FOLLOW_UP_DELAY_SECONDS` defaults to a deliberately short 120 seconds so the local demonstration is repeatable. This is a demo delay, not a production contact-time claim.
 
@@ -89,6 +95,8 @@ Tests use SQLite for fast API/schema tests and disposable PostgreSQL for migrati
 
 See [docs/phase-1-verification.md](docs/phase-1-verification.md) for the approved intake baseline and [docs/phase-2-verification.md](docs/phase-2-verification.md) for both executed lifecycle paths. Real n8n executions have verified both safe fallback-to-persistence and successful live NVIDIA enrichment; see the sanitized [provider diagnostic record](docs/provider-diagnostics.md).
 
+Phase 3 evidence and operations are in [docs/phase-3-verification.md](docs/phase-3-verification.md), [docs/phase-3-failed-run-postmortem.md](docs/phase-3-failed-run-postmortem.md), [docs/phase-3-runbook.md](docs/phase-3-runbook.md), and [docs/phase-3-self-review.md](docs/phase-3-self-review.md). Run `scripts/verify_phase3.sh` for deterministic verification and `scripts/phase3_demo.py --help` for authenticated local demo controls.
+
 ## Security
 
 - `.env` is ignored and `.env.example` contains placeholders only.
@@ -98,4 +106,5 @@ See [docs/phase-1-verification.md](docs/phase-1-verification.md) for the approve
 - Audit metadata intentionally stores only trace and operational state; it never stores secrets.
 - Mailpit data is ephemeral local runtime state and is not committed.
 - Lifecycle row locks prevent ordinary concurrent duplicate sends, but SMTP acceptance and the subsequent PostgreSQL commit are separate effects. A crash or lost acknowledgement between them is not an exactly-once guarantee; uncertain-delivery recovery remains outside Phase 2.
+- Phase 3 recovery covers CRM lead writes only. It does not automatically replay uncertain SMTP sends, booking confirmations, appointments, or follow-up email effects.
 - Appointments demonstrate durable booking state and timezone handling only. They are not backed by live service capacity or an external calendar.

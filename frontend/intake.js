@@ -89,6 +89,30 @@
     };
   }
 
+  function verifiedQueued(body, payload) {
+    return Boolean(
+      body &&
+        body.state === "received" &&
+        body.intake_state === "queued" &&
+        UUID_RE.test(body.recovery_job_id || "") &&
+        ["pending", "retry_wait", "processing"].includes(body.recovery_state) &&
+        body.submission_id === payload.submission_id &&
+        body.correlation_id === payload.correlation_id &&
+        body.crm_lead_id === undefined,
+    );
+  }
+
+  function queuedView(body, payload) {
+    if (!verifiedQueued(body, payload)) return null;
+    return {
+      title: "Enquiry received for processing",
+      intakeState: "queued",
+      correlationId: body.correlation_id,
+      recoveryJobId: body.recovery_job_id,
+      recoveryState: body.recovery_state,
+    };
+  }
+
   function bookingSnapshot(values) {
     return {
       correlation_id: String(values.correlation_id || ""),
@@ -175,7 +199,35 @@
   }
 
   function traceView(trace) {
-    if (!trace || !trace.lead || typeof trace.lead !== "object") return null;
+    if (!trace || typeof trace !== "object") return null;
+    const recoveryJob = Array.isArray(trace.recovery_jobs) ? trace.recovery_jobs[0] : null;
+    if (!trace.lead || typeof trace.lead !== "object") {
+      if (!recoveryJob) return null;
+      return {
+        pending: true,
+        customer: "Enquiry pending CRM delivery",
+        contact: "Private payload retained in the recovery job",
+        pipelineStage: "not created",
+        serviceType: "Prepared; not yet persisted",
+        urgency: "Pending",
+        preferredTime: "Pending",
+        aiStatus: "Prepared; inspect after completion",
+        needsReview: ["needs_review", "blocked"].includes(recoveryJob.state),
+        clientReceivedAt: "Available in private recovery data",
+        persistedAt: "Not yet created",
+        followUpStatus: "not scheduled",
+        followUpDueAt: "Not applicable",
+        followUpCompletedAt: "Not applicable",
+        appointmentId: "Not booked",
+        appointmentAt: "Not booked",
+        appointmentTimezone: "America/Vancouver",
+        bookingStatus: "unavailable while pending",
+        confirmationSentAt: "Not sent",
+        recoveryState: recoveryJob.state,
+        recoveryJobId: recoveryJob.id,
+        audits: [],
+      };
+    }
     const lead = trace.lead;
     const followUp = Array.isArray(trace.follow_ups) ? trace.follow_ups[0] : null;
     const appointment = Array.isArray(trace.appointments) ? trace.appointments[0] : null;
@@ -199,6 +251,9 @@
       bookingStatus: appointment?.status || "not booked",
       confirmationSentAt: appointment?.confirmation_sent_at || "Not sent",
       audits: Array.isArray(trace.audit_events) ? trace.audit_events : [],
+      pending: false,
+      recoveryState: recoveryJob?.state || "not queued",
+      recoveryJobId: recoveryJob?.id || "Not applicable",
     };
   }
 
@@ -220,11 +275,13 @@
     confirmationIsSettled,
     fetchWithTimeout,
     pendingFor,
+    queuedView,
     sameSnapshot,
     snapshot,
     successView,
     traceView,
     verifiedBooking,
+    verifiedQueued,
     verifiedSuccess,
   };
   if (typeof window !== "undefined") window.LeadIntake = api;

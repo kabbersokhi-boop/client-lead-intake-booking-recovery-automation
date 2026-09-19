@@ -1,4 +1,4 @@
-# Phase 1–2 architecture
+# Phase 1–3 architecture
 
 ## Responsibilities
 
@@ -9,6 +9,7 @@
 | NVIDIA NIM | Performs bounded extraction from the original message only. |
 | Development CRM adapter | Validates n8n contracts, persists leads, applies transactional booking state, and sends development email to Mailpit. It is not GoHighLevel. |
 | PostgreSQL | Stores lead, follow-up, appointment, source/server timestamp, idempotency, and audit state by correlation ID. |
+| CRM recovery job | Stores the validated payload before delivery, bounded lease, attempt history, safe errors, due time, and final CRM identity independently of a Lead row. |
 | Mailpit | Accepts local development SMTP messages and exposes them on a loopback web UI. It is not an external email provider. |
 
 ## Demonstration lead source
@@ -39,7 +40,7 @@ Appointment input is an offset-free Surrey business-local value with the explici
 
 The appointment record is a synthetic durable booking-state demonstration. It does not assert real service availability or reserve capacity in an external calendar.
 
-## Failure behavior
+## Failure and recovery behavior
 
 Invalid customer data takes the n8n validation branch and returns HTTP 422 with a safe message. No model call is made.
 
@@ -49,6 +50,10 @@ The CRM adapter validates all inbound data again. Its persistence operation uses
 
 The client `received_at` is stored as source data. `created_at` is assigned by the persistence layer and recorded in the creation audit as the trusted server timestamp; the browser clock is not treated as authoritative.
 
+Phase 3 persists the validated payload before delivery. Confirmed writes still return `201 created` or `200 replayed`; unfinished durable work returns `202 queued` with stable receipt identifiers but no CRM ID. Recovery processes one job per execution, claims with a bounded lease, reconciles by submission ID, obtains a shared database quota reservation, and only then counts and sends a write attempt. Quota deferral is not an attempt. Valid `Retry-After` values are never shortened.
+
+The disabled-by-default fixed-window simulator affects only registered synthetic submission IDs. Scoped POST lead writes, including idempotent replays, count; reads do not. Rejection happens before the business write with HTTP 429 and `Retry-After`. Bookings, follow-ups, NVIDIA, and unrelated submissions are unaffected.
+
 ## Development boundary
 
-The working integration remains `DevelopmentCRMProvider` plus the small lifecycle service. No GoHighLevel, real calendar, external email provider, or failure-recovery subsystem is configured.
+The working integration remains `DevelopmentCRMProvider` plus small lifecycle and CRM-write recovery services. No vendor CRM, real calendar, external email provider, general job platform, or Phase 4 integration is configured.
