@@ -1,9 +1,10 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.security import require_crm_adapter_key
 from app.db.session import get_db
 from app.models import AuditEvent, Lead
 from app.providers.crm import DevelopmentCRMProvider
@@ -14,6 +15,7 @@ from app.schemas.lead import (
     LeadResponse,
     TraceResponse,
 )
+from app.services.crm_service import SubmissionConflictError
 
 router = APIRouter()
 provider = DevelopmentCRMProvider()
@@ -27,12 +29,25 @@ def health() -> dict[str, str]:
 @router.post(
     "/api/crm/leads", response_model=CRMCreateResponse, status_code=status.HTTP_201_CREATED
 )
-def create_crm_lead(payload: CRMLeadCreate, db: Session = Depends(get_db)) -> CRMCreateResponse:
-    lead = provider.create_lead(db, payload)
+def create_crm_lead(
+    payload: CRMLeadCreate,
+    response: Response,
+    _: None = Depends(require_crm_adapter_key),
+    db: Session = Depends(get_db),
+) -> CRMCreateResponse:
+    try:
+        result = provider.create_lead(db, payload)
+    except SubmissionConflictError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Submission identifier is already associated with different lead data.",
+        ) from error
+    lead = result.lead
+    response.status_code = status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
     return CRMCreateResponse(
         crm_lead_id=lead.id, submission_id=lead.submission_id,
         correlation_id=lead.correlation_id, pipeline_stage=lead.pipeline_stage,
-        ai_status=lead.ai_status,
+        ai_status=lead.ai_status, intake_state="created" if result.created else "replayed",
     )
 
 

@@ -19,11 +19,13 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://lead_intake:change-me-for-local-development@postgres:5432/lead_intake}
       N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/webhook/lead-intake}
+      N8N_REQUEST_TIMEOUT_MS: ${N8N_REQUEST_TIMEOUT_MS:-15000}
+      CRM_ADAPTER_API_KEY: ${CRM_ADAPTER_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
     ports:
-      - "18000:8000"
+      - "127.0.0.1:18000:8000"
 
 volumes:
   postgres-data:

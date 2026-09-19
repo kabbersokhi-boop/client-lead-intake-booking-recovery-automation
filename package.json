@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "scripts": {
+    "test:browser": "node --test frontend/test/*.test.js",
+    "test:workflow": "node --test n8n/tests/*.test.js"
+  }
+}

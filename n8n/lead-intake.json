@@ -9,6 +9,7 @@
         "options": {}
       },
       "id": "receive-enquiry",
+      "webhookId": "0dc77fef-9fb8-41d9-bb6d-44d4171cd0a6",
       "name": "Receive Enquiry",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -19,7 +20,7 @@
     },
     {
       "parameters": {
-          "jsCode": "const rawRequest = $json.body ?? $json;\nlet request = rawRequest;\nconst errors = [];\nif (typeof rawRequest === 'string') {\n  try { request = JSON.parse(rawRequest); } catch { errors.push('Expected a JSON object.'); }\n}\nconst optionalText = (value) => typeof value === 'string' ? value.trim() || null : null;\nif (!request || typeof request !== 'object' || Array.isArray(request)) errors.push('Expected a JSON object.');\nconst fullName = optionalText(request?.full_name);\nconst email = optionalText(request?.email);\nconst phone = optionalText(request?.phone);\nconst message = optionalText(request?.message);\nif (!fullName) errors.push('Full name is required.');\nif (fullName && fullName.length > 160) errors.push('Full name is too long.');\nif (!email && !phone) errors.push('An email address or phone number is required.');\nif (email && (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || email.length > 254)) errors.push('Enter a valid email address.');\nif (phone && (phone.length > 50 || !/^[0-9+().\\-\\s]{7,50}$/.test(phone))) errors.push('Enter a valid phone number.');\nif (!message) errors.push('Message is required.');\nif (message && message.length > 5000) errors.push('Message is too long.');\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nif (!uuid.test(request?.submission_id || '')) errors.push('Submission identifier is invalid.');\nif (!uuid.test(request?.correlation_id || '')) errors.push('Correlation identifier is invalid.');\nif (Number.isNaN(Date.parse(request?.received_at || ''))) errors.push('Received timestamp is invalid.');\nreturn [{ json: { input_valid: errors.length === 0, errors, request } }];"
+          "jsCode": "const rawRequest = $json.body ?? $json;\nlet request = rawRequest;\nconst errors = [];\nif (typeof rawRequest === 'string') {\n  try { request = JSON.parse(rawRequest); } catch { errors.push('Expected a JSON object.'); }\n}\nconst textInput = (value) => value === null || value === undefined ? null : typeof value === 'string' ? value.trim() || null : undefined;\nif (!request || typeof request !== 'object' || Array.isArray(request)) errors.push('Expected a JSON object.');\nconst fullName = textInput(request?.full_name);\nconst email = textInput(request?.email);\nconst phone = textInput(request?.phone);\nconst message = textInput(request?.message);\nif (fullName === undefined || !fullName) errors.push('Full name is required.');\nif (fullName && fullName.length > 160) errors.push('Full name is too long.');\nif (email === undefined) errors.push('Email must be text when supplied.');\nif (phone === undefined) errors.push('Phone must be text when supplied.');\nif (!email && !phone) errors.push('An email address or phone number is required.');\nif (email && (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || email.length > 254)) errors.push('Enter a valid email address.');\nif (phone && (phone.length > 50 || !/^[0-9+().\\-\\s]{7,50}$/.test(phone) || (phone.match(/\\d/g) || []).length < 7)) errors.push('Enter a valid phone number.');\nif (message === undefined || !message) errors.push('Message is required.');\nif (message && message.length > 5000) errors.push('Message is too long.');\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nif (typeof request?.submission_id !== 'string' || !uuid.test(request.submission_id)) errors.push('Submission identifier is invalid.');\nif (typeof request?.correlation_id !== 'string' || !uuid.test(request.correlation_id)) errors.push('Correlation identifier is invalid.');\nif (typeof request?.received_at !== 'string' || Number.isNaN(Date.parse(request.received_at))) errors.push('Received timestamp is invalid.');\nreturn [{ json: { input_valid: errors.length === 0, errors, request } }];"
       },
       "id": "validate-input",
       "name": "Validate Required Fields",
@@ -64,7 +65,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const request = $json.request;\nconst trim = (value) => typeof value === 'string' ? value.trim() || null : null;\nreturn [{ json: {\n  lead: {\n    submission_id: request.submission_id,\n    correlation_id: request.correlation_id,\n    received_at: request.received_at,\n    full_name: trim(request.full_name),\n    email: trim(request.email)?.toLowerCase() ?? null,\n    phone: trim(request.phone),\n    original_message: trim(request.message)\n  }\n} }];"
+        "jsCode": "const request = $json.request;\nconst trim = (value) => typeof value === 'string' ? value.trim() || null : null;\nreturn [{ json: {\n  lead: {\n    submission_id: request.submission_id,\n    correlation_id: request.correlation_id,\n    received_at: request.received_at,\n    full_name: trim(request.full_name),\n    email: trim(request.email)?.toLowerCase() ?? null,\n    phone: trim(request.phone),\n    original_message: request.message,\n    normalized_message: trim(request.message)\n  }\n} }];"
       },
       "id": "normalize-lead",
       "name": "Normalize Contact Data",
@@ -91,7 +92,10 @@
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-          "jsonBody": "={{ { model: $env.NVIDIA_NIM_MODEL, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: 'Extract only service_type, location, preferred_time, urgency, and summary. Do not infer contact details, pricing, availability, appointment confirmation, or CRM status. Use service types: furnace_service, air_conditioning_service, plumbing_service, electrical_service, general_home_service, unknown. Use urgency: low, medium, high, urgent. Return JSON only.' }, { role: 'user', content: $('Normalize Contact Data').first().json.lead.original_message }] } }}"
+          "jsonBody": "={{ { model: $env.NVIDIA_NIM_MODEL, temperature: 0, messages: [{ role: 'system', content: 'Extract only service_type, location, preferred_time, urgency, and summary. Do not infer contact details, pricing, availability, appointment confirmation, or CRM status. Use service types: furnace_service, air_conditioning_service, plumbing_service, electrical_service, general_home_service, unknown. Use urgency: low, medium, high, urgent. Return JSON only.' }, { role: 'user', content: $('Normalize Contact Data').first().json.lead.normalized_message }] } }}",
+          "options": {
+            "timeout": "={{ Number($env.NVIDIA_NIM_TIMEOUT_MS || 10000) }}"
+          }
       },
       "id": "nvidia-nim",
       "name": "Extract Service Context with NVIDIA NIM",
@@ -105,7 +109,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const lead = $('Normalize Contact Data').first().json.lead;\nconst result = $json;\nconst allowedServices = new Set(['furnace_service','air_conditioning_service','plumbing_service','electrical_service','general_home_service','unknown']);\nconst allowedUrgency = new Set(['low','medium','high','urgent']);\nlet enrichment = null;\nlet aiStatus = 'fallback_unavailable';\nlet diagnostic = 'NVIDIA NIM did not return a usable response.';\ntry {\n  const content = result.choices?.[0]?.message?.content;\n  const parsed = typeof content === 'string' ? JSON.parse(content) : null;\n  const exactKeys = ['service_type', 'location', 'preferred_time', 'urgency', 'summary'];\n  if (!parsed || typeof parsed !== 'object' || Object.keys(parsed).some((key) => !exactKeys.includes(key))) throw new Error('Unexpected response shape');\n  if (!allowedServices.has(parsed.service_type)) throw new Error('Unsupported service type');\n  if (!allowedUrgency.has(parsed.urgency)) throw new Error('Unsupported urgency');\n  for (const field of ['location', 'preferred_time']) {\n    if (parsed[field] !== null && (typeof parsed[field] !== 'string' || parsed[field].trim().length > 160)) throw new Error('Invalid optional text');\n  }\n  if (typeof parsed.summary !== 'string' || !parsed.summary.trim() || parsed.summary.length > 600) throw new Error('Invalid summary');\n  enrichment = {\n    service_type: parsed.service_type,\n    location: parsed.location?.trim() || null,\n    preferred_time: parsed.preferred_time?.trim() || null,\n    urgency: parsed.urgency,\n    summary: parsed.summary.trim()\n  };\n  aiStatus = 'enriched';\n  diagnostic = null;\n} catch (error) {\n  aiStatus = result.error ? 'fallback_unavailable' : 'fallback_invalid';\n  diagnostic = aiStatus === 'fallback_invalid' ? 'NVIDIA NIM output failed application schema validation.' : diagnostic;\n}\nreturn [{ json: {\n  crmPayload: { ...lead, enrichment, ai_status: aiStatus, needs_review: aiStatus !== 'enriched', enrichment_diagnostic: diagnostic }\n} }];"
+        "jsCode": "const lead = $('Normalize Contact Data').first().json.lead;\nconst result = $json;\nconst allowedServices = new Set(['furnace_service','air_conditioning_service','plumbing_service','electrical_service','general_home_service','unknown']);\nconst allowedUrgency = new Set(['low','medium','high','urgent']);\nconst safeText = (value, max) => typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;\nconst error = result && typeof result.error === 'object' && result.error ? result.error : null;\nconst rawStatus = error?.httpCode ?? error?.statusCode ?? result?.statusCode;\nconst statusCode = Number.isInteger(rawStatus) && rawStatus >= 100 && rawStatus <= 599 ? rawStatus : null;\nlet enrichment = null;\nlet aiStatus = 'fallback_unavailable';\nlet diagnostic = 'NVIDIA NIM did not return a usable response.';\nlet providerMetadata = { provider: 'nvidia_nim', model_id: safeText($env.NVIDIA_NIM_MODEL, 160), outcome_class: 'provider_error', status_code: statusCode, error_code: safeText(error?.code ?? error?.name, 100), request_id: safeText(error?.requestId ?? error?.request_id, 160), execution_reference: safeText(String($execution?.id ?? ''), 160) };\ntry {\n  if (error) throw new Error('Provider request failed');\n  const content = result.choices?.[0]?.message?.content;\n  const parsed = typeof content === 'string' ? JSON.parse(content) : null;\n  const exactKeys = ['service_type', 'location', 'preferred_time', 'urgency', 'summary'];\n  if (!parsed || typeof parsed !== 'object' || Object.keys(parsed).length !== exactKeys.length || Object.keys(parsed).some((key) => !exactKeys.includes(key))) throw new Error('Unexpected response shape');\n  if (!allowedServices.has(parsed.service_type)) throw new Error('Unsupported service type');\n  if (!allowedUrgency.has(parsed.urgency)) throw new Error('Unsupported urgency');\n  for (const field of ['location', 'preferred_time']) {\n    if (parsed[field] !== null && (typeof parsed[field] !== 'string' || !parsed[field].trim() || parsed[field].trim().length > 160)) throw new Error('Invalid optional text');\n  }\n  if (typeof parsed.summary !== 'string' || !parsed.summary.trim() || parsed.summary.trim().length > 600) throw new Error('Invalid summary');\n  enrichment = { service_type: parsed.service_type, location: parsed.location?.trim() || null, preferred_time: parsed.preferred_time?.trim() || null, urgency: parsed.urgency, summary: parsed.summary.trim() };\n  aiStatus = 'enriched';\n  diagnostic = null;\n  providerMetadata = { ...providerMetadata, outcome_class: 'enriched', status_code: statusCode ?? 200, error_code: null };\n} catch (caught) {\n  aiStatus = error ? 'fallback_unavailable' : 'fallback_invalid';\n  diagnostic = aiStatus === 'fallback_invalid' ? 'NVIDIA NIM output failed application schema validation.' : diagnostic;\n  providerMetadata = { ...providerMetadata, outcome_class: error ? 'provider_error' : 'invalid_output', error_code: providerMetadata.error_code ?? (error ? 'provider_error' : 'invalid_model_output') };\n}\nreturn [{ json: { crmPayload: { ...lead, enrichment, ai_status: aiStatus, needs_review: aiStatus !== 'enriched', enrichment_diagnostic: diagnostic, provider_metadata: providerMetadata } } }];"
       },
       "id": "validate-ai",
       "name": "Validate AI Extraction",
@@ -120,11 +124,22 @@
       "parameters": {
         "method": "POST",
         "url": "={{ $env.CRM_ADAPTER_URL + '/api/crm/leads' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-CRM-Adapter-Key",
+              "value": "={{ $env.CRM_ADAPTER_API_KEY }}"
+            }
+          ]
+        },
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
         "jsonBody": "={{ $json.crmPayload }}",
-        "options": {}
+        "options": {
+          "timeout": "={{ Number($env.CRM_ADAPTER_TIMEOUT_MS || 8000) }}"
+        }
       },
       "id": "create-crm",
       "name": "Create CRM Lead",
@@ -138,7 +153,7 @@
     },
     {
       "parameters": {
-        "jsCode": "if ($json.error) {\n  return [{ json: { status_code: 502, response_body: { message: 'We could not process your enquiry. Please try again.' } } }];\n}\nconst crm = $json;\nreturn [{ json: {\n  status_code: 201,\n  response_body: {\n    state: 'accepted',\n    submission_id: crm.submission_id,\n    correlation_id: crm.correlation_id,\n    crm_lead_id: crm.crm_lead_id,\n    ai_status: crm.ai_status\n  }\n} }];"
+        "jsCode": "const expected = $('Validate AI Extraction').first().json.crmPayload;\nconst crm = $json;\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nconst valid = !crm.error && typeof crm === 'object' && uuid.test(crm.crm_lead_id || '') && crm.submission_id === expected.submission_id && crm.correlation_id === expected.correlation_id && crm.pipeline_stage === 'new_lead' && crm.ai_status === expected.ai_status && ['created', 'replayed'].includes(crm.intake_state);\nif (!valid) {\n  return [{ json: { status_code: 502, response_body: { message: 'We could not confirm that your enquiry was saved. Please retry.' } } }];\n}\nreturn [{ json: { status_code: crm.intake_state === 'created' ? 201 : 200, response_body: { state: 'accepted', intake_state: crm.intake_state, submission_id: crm.submission_id, correlation_id: crm.correlation_id, crm_lead_id: crm.crm_lead_id, ai_status: crm.ai_status } } }];"
       },
       "id": "build-success",
       "name": "Build Intake Result",

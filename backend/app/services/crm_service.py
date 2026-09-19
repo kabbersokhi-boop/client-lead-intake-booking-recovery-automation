@@ -1,45 +1,111 @@
+"""Idempotent persistence for the development CRM adapter."""
+
+import hashlib
+import json
+from dataclasses import dataclass
+
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import AuditEvent, Lead
 from app.schemas.lead import CRMLeadCreate
 
 
+class SubmissionConflictError(Exception):
+    """A submission identifier was reused for different customer data."""
+
+
+@dataclass(frozen=True)
+class CreateLeadResult:
+    lead: Lead
+    created: bool
+
+
+def submission_fingerprint(payload: CRMLeadCreate) -> str:
+    """Hash stable, normalized customer data only; AI output is deliberately excluded."""
+    normalized = {
+        "full_name": payload.full_name.casefold(),
+        "email": str(payload.email).casefold() if payload.email else None,
+        "phone": "".join(character for character in (payload.phone or "") if character.isdigit())
+        or None,
+        "normalized_message": payload.normalized_message,
+    }
+    encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 class DevelopmentCRMService:
     """Persistence implementation for the development CRM adapter boundary."""
 
-    def create_lead(self, db: Session, payload: CRMLeadCreate) -> Lead:
+    def create_lead(self, db: Session, payload: CRMLeadCreate) -> CreateLeadResult:
+        fingerprint = submission_fingerprint(payload)
         existing = db.scalar(select(Lead).where(Lead.submission_id == payload.submission_id))
         if existing:
-            return existing
+            return self._existing_result(existing, fingerprint)
+
         enrichment = payload.enrichment
         lead = Lead(
-            submission_id=payload.submission_id, correlation_id=payload.correlation_id,
-            full_name=payload.full_name, email=str(payload.email) if payload.email else None,
-            phone=payload.phone, original_message=payload.original_message,
+            submission_id=payload.submission_id,
+            correlation_id=payload.correlation_id,
+            full_name=payload.full_name,
+            email=str(payload.email) if payload.email else None,
+            phone=payload.phone,
+            original_message=payload.original_message,
+            normalized_message=payload.normalized_message,
+            submission_fingerprint=fingerprint,
+            client_received_at=payload.received_at,
             service_type=enrichment.service_type if enrichment else None,
             location=enrichment.location if enrichment else None,
             preferred_time=enrichment.preferred_time if enrichment else None,
             urgency=enrichment.urgency if enrichment else None,
-            summary=enrichment.summary if enrichment else None, ai_status=payload.ai_status,
+            summary=enrichment.summary if enrichment else None,
+            ai_status=payload.ai_status,
             needs_review=payload.needs_review,
+            provider_metadata=(
+                payload.provider_metadata.model_dump(exclude_none=True)
+                if payload.provider_metadata
+                else None
+            ),
         )
         db.add(lead)
-        db.flush()
-        db.add(
-            AuditEvent(
-                correlation_id=payload.correlation_id,
-                lead_id=lead.id,
-                event_type="crm.lead_created",
-                status="success",
-                metadata_json={
-                    "submission_id": str(payload.submission_id),
-                    "ai_status": payload.ai_status,
-                    "needs_review": payload.needs_review,
-                    "diagnostic": payload.enrichment_diagnostic,
-                },
+        try:
+            db.flush()
+            db.refresh(lead)
+            db.add(
+                AuditEvent(
+                    correlation_id=payload.correlation_id,
+                    lead_id=lead.id,
+                    event_type="crm.lead_created",
+                    status="success",
+                    metadata_json={
+                        "submission_id": str(payload.submission_id),
+                        "ai_status": payload.ai_status,
+                        "needs_review": payload.needs_review,
+                        "client_received_at": payload.received_at.isoformat(),
+                        "persisted_at": lead.created_at.isoformat() if lead.created_at else None,
+                        "diagnostic": payload.enrichment_diagnostic,
+                        "provider": (
+                            payload.provider_metadata.model_dump(exclude_none=True)
+                            if payload.provider_metadata
+                            else None
+                        ),
+                    },
+                )
             )
-        )
-        db.commit()
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            existing = db.scalar(select(Lead).where(Lead.submission_id == payload.submission_id))
+            if existing:
+                return self._existing_result(existing, fingerprint)
+            raise
+
         db.refresh(lead)
-        return lead
+        return CreateLeadResult(lead=lead, created=True)
+
+    @staticmethod
+    def _existing_result(existing: Lead, fingerprint: str) -> CreateLeadResult:
+        if existing.submission_fingerprint != fingerprint:
+            raise SubmissionConflictError
+        return CreateLeadResult(lead=existing, created=False)

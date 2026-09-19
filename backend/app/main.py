@@ -18,8 +18,11 @@ app.include_router(router)
 
 
 @app.get("/api/config")
-def frontend_config() -> dict[str, str]:
-    return {"n8n_webhook_url": settings.n8n_webhook_url}
+def frontend_config() -> dict[str, str | int]:
+    return {
+        "n8n_webhook_url": settings.n8n_webhook_url,
+        "n8n_request_timeout_ms": settings.n8n_request_timeout_ms,
+    }
 
 
 frontend_dir = Path(__file__).resolve().parents[2] / "frontend"

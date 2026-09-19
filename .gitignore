@@ -1,4 +1,5 @@
 .env
+.n8n-runtime.env
 .venv/
 __pycache__/
 *.py[cod]

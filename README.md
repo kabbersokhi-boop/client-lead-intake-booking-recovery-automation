@@ -20,32 +20,35 @@ FastAPI CRM Integration Boundary
     PostgreSQL
 ```
 
-- The browser creates a `submission_id`, `correlation_id`, and `received_at` for every enquiry.
-- n8n validates customer input before calling NVIDIA NIM, normalizes contact values, validates model output, and explicitly returns 422, 201, or a safe 502 response.
+- The browser creates a `submission_id`, `correlation_id`, and `received_at` for a pending enquiry. An unchanged retry reuses those values; editing the enquiry deliberately creates a new identity.
+- n8n validates customer input before calling NVIDIA NIM, preserves the source message separately from normalized processing text, validates model output, and explicitly returns 422, 201/200, or a safe 502 response.
 - NVIDIA NIM is used only to extract service context from the original message; it cannot establish availability, bookings, prices, CRM state, or contact details.
 - The FastAPI **development CRM adapter** is a small persistence boundary, not GoHighLevel. `DevelopmentCRMProvider` and the future `GoHighLevelCRMProvider` contract keep n8n independent of the eventual CRM vendor.
-- PostgreSQL stores leads and safe audit metadata keyed by the correlation ID.
+- PostgreSQL stores leads, the client-provided source timestamp, a server persistence timestamp, and safe audit metadata keyed by the correlation ID. Phone shape checks require formatting-compatible text with at least seven digits; they do not prove that a number is reachable.
 
 ## Run locally
 
-1. Copy `.env.example` to `.env`, using local-only database values. Do not add NVIDIA or n8n secrets to Git.
+1. Copy `.env.example` to `.env`, using local-only database values. Generate a long random `CRM_ADAPTER_API_KEY`; do not add it, NVIDIA keys, or n8n secrets to Git.
 2. Start PostgreSQL and the FastAPI service:
 
    ```bash
    docker compose up --build
    ```
 
-   The backend runs migrations before starting and serves the form at [http://localhost:18000](http://localhost:18000). Health is available at [http://localhost:18000/health](http://localhost:18000/health).
+   The backend runs migrations before starting and serves the form at [http://localhost:18000](http://localhost:18000). Health is available at [http://localhost:18000/health](http://localhost:18000/health). Compose publishes this service only to `127.0.0.1`; PostgreSQL has no host port.
 
-3. Configure the existing n8n instance with environment variables, then restart that instance:
+3. Configure the existing n8n instance with protected runtime values, then restart it:
 
    ```text
-   NVIDIA_NIM_API_KEY=<your key>
-   NVIDIA_NIM_MODEL=<enabled NVIDIA model ID>
-   CRM_ADAPTER_URL=http://host.docker.internal:18000
+   NVIDIA_NIM_API_KEY=<rotated key in protected runtime storage>
+   NVIDIA_NIM_MODEL=<one currently enabled NVIDIA model ID>
+   NVIDIA_NIM_TIMEOUT_MS=10000
+   CRM_ADAPTER_API_KEY=<same locally generated adapter key>
+   CRM_ADAPTER_TIMEOUT_MS=8000
+   CRM_ADAPTER_URL=http://backend:8000
    ```
 
-   On Linux Docker, add `host.docker.internal:host-gateway` to the existing n8n container's `extra_hosts`, then restart it. This container currently does not resolve that hostname. The workflow returns the required CORS response headers for `http://localhost:18000`; the browser deliberately uses a simple `text/plain` JSON request to avoid a preflight request.
+   When n8n is a separate Docker container, attach it to the Compose network and use `http://backend:8000`; this preserves private container-to-container access while both editor and browser-facing backend stay loopback-bound. The CRM write endpoint requires `X-CRM-Adapter-Key`; the workflow supplies it from n8n runtime configuration. The workflow returns CORS headers for `http://localhost:18000` and the browser uses JSON requests with a 15-second configurable acknowledgement timeout.
 
 4. Import `n8n/lead-intake.json` in n8n, activate it, and use the production webhook URL shown by n8n. Put that URL in `N8N_WEBHOOK_URL` before starting the backend. The export has no credentials or credential references: NVIDIA uses the n8n environment variable directly.
 
@@ -68,16 +71,16 @@ pytest -q
 ruff check app tests
 ```
 
-Tests use SQLite and mocked/persisted fallback inputs only; they never call NVIDIA NIM or n8n. Public GitHub Actions runs the same lint and test commands without secrets.
+Tests use SQLite for fast API/schema tests and disposable PostgreSQL for migration, persistence, and concurrent replay coverage. Node tests execute the exported n8n code-node logic with deterministic fixtures and browser retry helpers. They never call NVIDIA NIM or n8n. Public GitHub Actions provisions PostgreSQL and runs all deterministic tests without secrets.
 
 ## Live verification
 
-Use the checklist in [docs/phase-1-verification.md](docs/phase-1-verification.md). A live NVIDIA NIM call and a live n8n execution must be recorded there only after they actually succeed. This repository does not claim that they have run merely because the workflow definition exists.
-
-The local verification performed for this demonstration includes a real n8n webhook execution that reached the NVIDIA endpoint, took the safe `fallback_unavailable` branch when the account could not invoke an enabled model, persisted the lead, created an audit event, and returned HTTP 201. A successful live NVIDIA enrichment is **not** claimed: the supplied account can authenticate and list models, but its tested inference functions are retired or not provisioned.
+See [docs/phase-1-verification.md](docs/phase-1-verification.md) for executed evidence and unexecuted checks. A real n8n webhook execution has verified the safe fallback-to-persistence path. A successful live NVIDIA enrichment is **not** claimed; see the sanitized [provider diagnostic record](docs/provider-diagnostics.md).
 
 ## Security
 
 - `.env` is ignored and `.env.example` contains placeholders only.
 - The n8n export is sanitized: it contains no keys, credential IDs, account identifiers, or private endpoints.
+- The browser temporarily uses `sessionStorage` only for an ambiguous pending submission so it can retry with the same identity; it clears that data only after verified success. It stores no secrets.
+- Read endpoints are verification-only and Compose keeps them loopback-only. CORS is not used as authentication; the n8n-to-CRM write route uses the shared adapter credential.
 - Audit metadata intentionally stores only trace and operational state; it never stores secrets.

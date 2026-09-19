@@ -7,6 +7,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: lead_intake_test
+          POSTGRES_USER: lead_intake_test
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lead_intake_test -d lead_intake_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_URL: postgresql+psycopg://lead_intake_test:test-only-password@localhost:5432/lead_intake_test
     defaults:
       run:
         working-directory: backend
@@ -18,3 +34,10 @@ jobs:
       - run: pip install -r requirements.txt
       - run: ruff check app tests
       - run: pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm run test:browser
+        working-directory: .
+      - run: npm run test:workflow
+        working-directory: .

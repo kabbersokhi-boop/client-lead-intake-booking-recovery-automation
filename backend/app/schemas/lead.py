@@ -24,11 +24,25 @@ class Urgency(StrEnum):
     urgent = "urgent"
 
 
-def clean_optional(value: str | None) -> str | None:
+def clean_optional(value: object) -> str | None:
     if value is None:
         return None
+    if not isinstance(value, str):
+        raise ValueError("must be a string or null")
     value = value.strip()
     return value or None
+
+
+def clean_required(value: object) -> str:
+    if not isinstance(value, str) or not (cleaned := value.strip()):
+        raise ValueError("must be a non-empty string")
+    return cleaned
+
+
+def validate_phone_shape(value: str) -> str:
+    if not PHONE_RE.fullmatch(value) or len(re.sub(r"\D", "", value)) < 7:
+        raise ValueError("must contain at least seven digits and only common phone formatting")
+    return value
 
 
 class AIEnrichment(BaseModel):
@@ -41,9 +55,27 @@ class AIEnrichment(BaseModel):
     summary: str = Field(min_length=1, max_length=600)
 
     _clean_location = field_validator("location", "preferred_time", mode="before")(clean_optional)
-    _clean_summary = field_validator("summary", mode="before")(
-        lambda value: value.strip() if isinstance(value, str) else value
+    _clean_summary = field_validator("summary", mode="before")(clean_required)
+
+
+class ProviderMetadata(BaseModel):
+    """Safe, bounded diagnostic fields supplied by the orchestration layer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(min_length=1, max_length=80)
+    model_id: str | None = Field(default=None, max_length=160)
+    outcome_class: str = Field(
+        pattern="^(enriched|invalid_output|provider_error|not_attempted)$"
     )
+    status_code: int | None = Field(default=None, ge=100, le=599)
+    error_code: str | None = Field(default=None, max_length=100)
+    request_id: str | None = Field(default=None, max_length=160)
+    execution_reference: str | None = Field(default=None, max_length=160)
+
+    _clean_strings = field_validator(
+        "provider", "model_id", "error_code", "request_id", "execution_reference", mode="before"
+    )(clean_optional)
 
 
 class CRMLeadCreate(BaseModel):
@@ -56,36 +88,48 @@ class CRMLeadCreate(BaseModel):
     email: EmailStr | None = None
     phone: str | None = Field(default=None, max_length=50)
     original_message: str = Field(max_length=5000)
+    normalized_message: str = Field(max_length=5000)
     enrichment: AIEnrichment | None = None
     ai_status: str = Field(pattern="^(enriched|fallback_invalid|fallback_unavailable)$")
     needs_review: bool
     enrichment_diagnostic: str | None = Field(default=None, max_length=300)
+    provider_metadata: ProviderMetadata | None = None
 
-    @field_validator("full_name", "original_message", mode="before")
+    @field_validator("full_name", "normalized_message", mode="before")
     @classmethod
-    def required_trimmed(cls, value: str) -> str:
-        if not isinstance(value, str) or not (cleaned := value.strip()):
+    def required_trimmed(cls, value: object) -> str:
+        return clean_required(value)
+
+    @field_validator("original_message", mode="before")
+    @classmethod
+    def original_message_is_present(cls, value: object) -> str:
+        if not isinstance(value, str) or not value.strip():
             raise ValueError("must be a non-empty string")
-        return cleaned
+        return value
 
     @field_validator("email", mode="before")
     @classmethod
-    def normalized_email(cls, value: str | None) -> str | None:
+    def normalized_email(cls, value: object) -> str | None:
         value = clean_optional(value)
         return value.lower() if value else None
 
     @field_validator("phone", mode="before")
     @classmethod
-    def normalized_phone(cls, value: str | None) -> str | None:
+    def normalized_phone(cls, value: object) -> str | None:
         value = clean_optional(value)
-        if value and not PHONE_RE.fullmatch(value):
-            raise ValueError("must be a usable phone number")
-        return value
+        return validate_phone_shape(value) if value else None
 
     @model_validator(mode="after")
     def must_have_contact_method(self):
         if not self.email and not self.phone:
             raise ValueError("at least one contact method is required")
+        if self.ai_status == "enriched" and not self.enrichment:
+            raise ValueError("enrichment is required when ai_status is enriched")
+        if self.ai_status.startswith("fallback_"):
+            if not self.needs_review:
+                raise ValueError("needs_review must be true for fallback AI status")
+            if self.enrichment is not None:
+                raise ValueError("enrichment must be null for fallback AI status")
         return self
 
 
@@ -97,14 +141,17 @@ class LeadResponse(BaseModel):
     email: str | None
     phone: str | None
     original_message: str
+    normalized_message: str
     service_type: ServiceType | None
     location: str | None
     preferred_time: str | None
     urgency: Urgency | None
     summary: str | None
+    provider_metadata: dict | None
     ai_status: str
     needs_review: bool
     pipeline_stage: str
+    client_received_at: datetime
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -116,6 +163,7 @@ class CRMCreateResponse(BaseModel):
     correlation_id: uuid.UUID
     pipeline_stage: str
     ai_status: str
+    intake_state: str
 
 
 class AuditEventResponse(BaseModel):
