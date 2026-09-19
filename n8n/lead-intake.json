@@ -19,7 +19,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const request = $json.body ?? $json;\nconst errors = [];\nconst optionalText = (value) => typeof value === 'string' ? value.trim() || null : null;\nif (!request || typeof request !== 'object' || Array.isArray(request)) errors.push('Expected a JSON object.');\nconst fullName = optionalText(request.full_name);\nconst email = optionalText(request.email);\nconst phone = optionalText(request.phone);\nconst message = optionalText(request.message);\nif (!fullName) errors.push('Full name is required.');\nif (fullName && fullName.length > 160) errors.push('Full name is too long.');\nif (!email && !phone) errors.push('An email address or phone number is required.');\nif (email && (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || email.length > 254)) errors.push('Enter a valid email address.');\nif (phone && (phone.length > 50 || !/^[0-9+().\\-\\s]{7,50}$/.test(phone))) errors.push('Enter a valid phone number.');\nif (!message) errors.push('Message is required.');\nif (message && message.length > 5000) errors.push('Message is too long.');\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nif (!uuid.test(request.submission_id || '')) errors.push('Submission identifier is invalid.');\nif (!uuid.test(request.correlation_id || '')) errors.push('Correlation identifier is invalid.');\nif (Number.isNaN(Date.parse(request.received_at || ''))) errors.push('Received timestamp is invalid.');\nreturn [{ json: { input_valid: errors.length === 0, errors, request } }];"
+          "jsCode": "const rawRequest = $json.body ?? $json;\nlet request = rawRequest;\nconst errors = [];\nif (typeof rawRequest === 'string') {\n  try { request = JSON.parse(rawRequest); } catch { errors.push('Expected a JSON object.'); }\n}\nconst optionalText = (value) => typeof value === 'string' ? value.trim() || null : null;\nif (!request || typeof request !== 'object' || Array.isArray(request)) errors.push('Expected a JSON object.');\nconst fullName = optionalText(request?.full_name);\nconst email = optionalText(request?.email);\nconst phone = optionalText(request?.phone);\nconst message = optionalText(request?.message);\nif (!fullName) errors.push('Full name is required.');\nif (fullName && fullName.length > 160) errors.push('Full name is too long.');\nif (!email && !phone) errors.push('An email address or phone number is required.');\nif (email && (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || email.length > 254)) errors.push('Enter a valid email address.');\nif (phone && (phone.length > 50 || !/^[0-9+().\\-\\s]{7,50}$/.test(phone))) errors.push('Enter a valid phone number.');\nif (!message) errors.push('Message is required.');\nif (message && message.length > 5000) errors.push('Message is too long.');\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nif (!uuid.test(request?.submission_id || '')) errors.push('Submission identifier is invalid.');\nif (!uuid.test(request?.correlation_id || '')) errors.push('Correlation identifier is invalid.');\nif (Number.isNaN(Date.parse(request?.received_at || ''))) errors.push('Received timestamp is invalid.');\nreturn [{ json: { input_valid: errors.length === 0, errors, request } }];"
       },
       "id": "validate-input",
       "name": "Validate Required Fields",
@@ -153,9 +153,21 @@
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ $json.response_body }}",
-        "options": {
-          "responseCode": "={{ $json.status_code }}"
-        }
+            "options": {
+              "responseCode": "={{ $json.status_code }}",
+              "responseHeaders": {
+                "entries": [
+                  {
+                    "name": "Access-Control-Allow-Origin",
+                    "value": "http://localhost:18000"
+                  },
+                  {
+                    "name": "Vary",
+                    "value": "Origin"
+                  }
+                ]
+              }
+            }
       },
       "id": "respond-success",
       "name": "Return Enquiry Result",
@@ -183,9 +195,21 @@
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ $json.response_body }}",
-        "options": {
-          "responseCode": "={{ $json.status_code }}"
-        }
+            "options": {
+              "responseCode": "={{ $json.status_code }}",
+              "responseHeaders": {
+                "entries": [
+                  {
+                    "name": "Access-Control-Allow-Origin",
+                    "value": "http://localhost:18000"
+                  },
+                  {
+                    "name": "Vary",
+                    "value": "Origin"
+                  }
+                ]
+              }
+            }
       },
       "id": "respond-invalid",
       "name": "Return Validation Error",

@@ -10,6 +10,10 @@
 | Development CRM adapter | Validates the n8n contract and persists the lead through a provider interface. It is not GoHighLevel. |
 | PostgreSQL | Stores lead data and auditable event records by correlation ID. |
 
+## Verification trace
+
+After a successful submission, the browser displays the returned correlation ID and pre-fills the read-only trace lookup panel. `GET /api/traces/{correlation_id}` joins the persisted lead with its safe audit events so an interviewer can inspect what happened to one specific synthetic lead. This query does not mutate data and is intentionally separate from the intake workflow.
+
 ## Failure behavior
 
 Invalid customer data takes the n8n validation branch and returns HTTP 422 with a safe message. No model call is made.

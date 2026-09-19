@@ -128,3 +128,9 @@ class AuditEventResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TraceResponse(BaseModel):
+    correlation_id: uuid.UUID
+    lead: LeadResponse | None
+    audit_events: list[AuditEventResponse]

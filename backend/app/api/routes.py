@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import AuditEvent, Lead
 from app.providers.crm import DevelopmentCRMProvider
-from app.schemas.lead import AuditEventResponse, CRMCreateResponse, CRMLeadCreate, LeadResponse
+from app.schemas.lead import (
+    AuditEventResponse,
+    CRMCreateResponse,
+    CRMLeadCreate,
+    LeadResponse,
+    TraceResponse,
+)
 
 router = APIRouter()
 provider = DevelopmentCRMProvider()
@@ -48,6 +54,13 @@ def list_audit_events(correlation_id: uuid.UUID, db: Session = Depends(get_db)) 
         .order_by(AuditEvent.created_at.asc())
     )
     return list(db.scalars(statement))
+
+
+@router.get("/api/traces/{correlation_id}", response_model=TraceResponse)
+def get_trace(correlation_id: uuid.UUID, db: Session = Depends(get_db)) -> TraceResponse:
+    lead = db.scalar(select(Lead).where(Lead.correlation_id == correlation_id))
+    audit_events = list_audit_events(correlation_id=correlation_id, db=db)
+    return TraceResponse(correlation_id=correlation_id, lead=lead, audit_events=audit_events)
 
 
 @router.get("/api/leads/{lead_id}", response_model=LeadResponse)

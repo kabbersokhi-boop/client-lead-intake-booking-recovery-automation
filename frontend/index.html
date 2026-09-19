@@ -23,6 +23,20 @@
           <p id="form-status" role="status" aria-live="polite"></p>
         </form>
       </section>
+      <section class="card trace-card" aria-labelledby="trace-title">
+        <div class="trace-heading">
+          <div>
+            <p class="eyebrow">Verification</p>
+            <h2 id="trace-title">Trace a persisted enquiry</h2>
+          </div>
+          <p>Use the correlation ID returned after submission to inspect the development CRM adapter.</p>
+        </div>
+        <form id="trace-form" class="trace-form">
+          <label>Correlation ID<input id="trace-id" name="correlation_id" autocomplete="off" required /></label>
+          <button type="submit" class="secondary">View persisted lead</button>
+        </form>
+        <pre id="trace-result" aria-live="polite"></pre>
+      </section>
     </main>
     <script src="/app.js"></script>
   </body>

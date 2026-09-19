@@ -45,16 +45,17 @@ FastAPI CRM Integration Boundary
    CRM_ADAPTER_URL=http://host.docker.internal:18000
    ```
 
-   On Linux Docker, make `host.docker.internal` resolve to the host gateway for the existing n8n container, or use a reachable network address for the backend. Configure n8n to allow browser CORS from `http://localhost:18000` if its deployment does not already permit it.
+   On Linux Docker, add `host.docker.internal:host-gateway` to the existing n8n container's `extra_hosts`, then restart it. This container currently does not resolve that hostname. The workflow returns the required CORS response headers for `http://localhost:18000`; the browser deliberately uses a simple `text/plain` JSON request to avoid a preflight request.
 
 4. Import `n8n/lead-intake.json` in n8n, activate it, and use the production webhook URL shown by n8n. Put that URL in `N8N_WEBHOOK_URL` before starting the backend. The export has no credentials or credential references: NVIDIA uses the n8n environment variable directly.
 
 5. Submit the form with fictional data. Query the resulting records:
 
    ```bash
-   curl http://localhost:18000/api/leads?correlation_id=<correlation-id>
-   curl http://localhost:18000/api/audit-events?correlation_id=<correlation-id>
+   curl http://localhost:18000/api/traces/<correlation-id>
    ```
+
+   The page also includes a **Trace a persisted enquiry** panel. It displays the stored lead and safe audit events through this read-only endpoint; it is a verification view for the development CRM adapter, not a GoHighLevel UI.
 
 ## Development and automated checks
 

@@ -28,7 +28,6 @@ From the configured n8n workflow, use the supplied synthetic furnace enquiry. Op
 2. Enter the fictional Maya Verma enquiry and submit.
 3. Confirm a 201 browser state with its correlation ID.
 4. In the actual n8n instance, confirm one successful execution follows all named nodes.
-5. Query `GET /api/leads?correlation_id=<id>` and verify the original customer message, identifiers, enrichment, and `new_lead` stage.
-6. Query `GET /api/audit-events?correlation_id=<id>` and verify `crm.lead_created`.
+5. Use the page's **Trace a persisted enquiry** panel, or query `GET /api/traces/<id>`, and verify the original customer message, identifiers, enrichment, `new_lead` stage, and `crm.lead_created` audit event.
 
 Record the final synthetic correlation ID in the final phase report, not in the repository. Never place a credential, token, or private n8n execution URL in this document.

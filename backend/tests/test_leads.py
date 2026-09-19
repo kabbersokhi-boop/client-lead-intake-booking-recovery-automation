@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from app.api.routes import get_lead, list_audit_events, list_leads
+from app.api.routes import get_lead, get_trace, list_audit_events, list_leads
 from app.models import AuditEvent
 from app.providers.crm import DevelopmentCRMProvider
 from app.schemas.lead import CRMLeadCreate
@@ -69,6 +69,11 @@ def test_crm_persists_enriched_lead_audit_event_and_correlation(db):
     assert events[0].event_type == "crm.lead_created"
     assert events[0].metadata_json["ai_status"] == "enriched"
     assert db.scalar(select(AuditEvent).where(AuditEvent.lead_id == response.id))
+
+    trace = get_trace(correlation_id=uuid.UUID(request["correlation_id"]), db=db)
+    assert trace.lead is not None
+    assert trace.lead.id == response.id
+    assert len(trace.audit_events) == 1
 
 
 @pytest.mark.parametrize("ai_status", ["fallback_invalid", "fallback_unavailable"])
