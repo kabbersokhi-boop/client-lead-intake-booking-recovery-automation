@@ -91,7 +91,7 @@
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ { model: $env.NVIDIA_NIM_MODEL || 'meta/llama-3.1-8b-instruct', temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: 'Extract only service_type, location, preferred_time, urgency, and summary. Do not infer contact details, pricing, availability, appointment confirmation, or CRM status. Use service types: furnace_service, air_conditioning_service, plumbing_service, electrical_service, general_home_service, unknown. Use urgency: low, medium, high, urgent. Return JSON only.' }, { role: 'user', content: $('Normalize Contact Data').first().json.lead.original_message }] } }}"
+          "jsonBody": "={{ { model: $env.NVIDIA_NIM_MODEL, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: 'Extract only service_type, location, preferred_time, urgency, and summary. Do not infer contact details, pricing, availability, appointment confirmation, or CRM status. Use service types: furnace_service, air_conditioning_service, plumbing_service, electrical_service, general_home_service, unknown. Use urgency: low, medium, high, urgent. Return JSON only.' }, { role: 'user', content: $('Normalize Contact Data').first().json.lead.original_message }] } }}"
       },
       "id": "nvidia-nim",
       "name": "Extract Service Context with NVIDIA NIM",
@@ -306,13 +306,7 @@
       ]
     }
   },
-  "active": false,
   "settings": {
     "executionOrder": "v1"
-  },
-  "versionId": "sanitized-phase-1",
-  "meta": {
-    "templateCredsSetupCompleted": false
-  },
-  "tags": []
+  }
 }

@@ -41,7 +41,7 @@ FastAPI CRM Integration Boundary
 
    ```text
    NVIDIA_NIM_API_KEY=<your key>
-   NVIDIA_NIM_MODEL=meta/llama-3.1-8b-instruct
+   NVIDIA_NIM_MODEL=<enabled NVIDIA model ID>
    CRM_ADAPTER_URL=http://host.docker.internal:18000
    ```
 
