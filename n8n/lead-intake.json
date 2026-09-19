@@ -1,0 +1,318 @@
+{
+  "name": "Lead Intake - Validation, AI Enrichment and CRM Persistence",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "receive-enquiry",
+      "name": "Receive Enquiry",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $json.body ?? $json;\nconst errors = [];\nconst optionalText = (value) => typeof value === 'string' ? value.trim() || null : null;\nif (!request || typeof request !== 'object' || Array.isArray(request)) errors.push('Expected a JSON object.');\nconst fullName = optionalText(request.full_name);\nconst email = optionalText(request.email);\nconst phone = optionalText(request.phone);\nconst message = optionalText(request.message);\nif (!fullName) errors.push('Full name is required.');\nif (fullName && fullName.length > 160) errors.push('Full name is too long.');\nif (!email && !phone) errors.push('An email address or phone number is required.');\nif (email && (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || email.length > 254)) errors.push('Enter a valid email address.');\nif (phone && (phone.length > 50 || !/^[0-9+().\\-\\s]{7,50}$/.test(phone))) errors.push('Enter a valid phone number.');\nif (!message) errors.push('Message is required.');\nif (message && message.length > 5000) errors.push('Message is too long.');\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nif (!uuid.test(request.submission_id || '')) errors.push('Submission identifier is invalid.');\nif (!uuid.test(request.correlation_id || '')) errors.push('Correlation identifier is invalid.');\nif (Number.isNaN(Date.parse(request.received_at || ''))) errors.push('Received timestamp is invalid.');\nreturn [{ json: { input_valid: errors.length === 0, errors, request } }];"
+      },
+      "id": "validate-input",
+      "name": "Validate Required Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.input_valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "input-valid",
+      "name": "Input Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $json.request;\nconst trim = (value) => typeof value === 'string' ? value.trim() || null : null;\nreturn [{ json: {\n  lead: {\n    submission_id: request.submission_id,\n    correlation_id: request.correlation_id,\n    received_at: request.received_at,\n    full_name: trim(request.full_name),\n    email: trim(request.email)?.toLowerCase() ?? null,\n    phone: trim(request.phone),\n    original_message: trim(request.message)\n  }\n} }];"
+      },
+      "id": "normalize-lead",
+      "name": "Normalize Contact Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.NVIDIA_NIM_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: $env.NVIDIA_NIM_MODEL || 'meta/llama-3.1-8b-instruct', temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: 'Extract only service_type, location, preferred_time, urgency, and summary. Do not infer contact details, pricing, availability, appointment confirmation, or CRM status. Use service types: furnace_service, air_conditioning_service, plumbing_service, electrical_service, general_home_service, unknown. Use urgency: low, medium, high, urgent. Return JSON only.' }, { role: 'user', content: $('Normalize Contact Data').first().json.lead.original_message }] } }}"
+      },
+      "id": "nvidia-nim",
+      "name": "Extract Service Context with NVIDIA NIM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        220
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $('Normalize Contact Data').first().json.lead;\nconst result = $json;\nconst allowedServices = new Set(['furnace_service','air_conditioning_service','plumbing_service','electrical_service','general_home_service','unknown']);\nconst allowedUrgency = new Set(['low','medium','high','urgent']);\nlet enrichment = null;\nlet aiStatus = 'fallback_unavailable';\nlet diagnostic = 'NVIDIA NIM did not return a usable response.';\ntry {\n  const content = result.choices?.[0]?.message?.content;\n  const parsed = typeof content === 'string' ? JSON.parse(content) : null;\n  const exactKeys = ['service_type', 'location', 'preferred_time', 'urgency', 'summary'];\n  if (!parsed || typeof parsed !== 'object' || Object.keys(parsed).some((key) => !exactKeys.includes(key))) throw new Error('Unexpected response shape');\n  if (!allowedServices.has(parsed.service_type)) throw new Error('Unsupported service type');\n  if (!allowedUrgency.has(parsed.urgency)) throw new Error('Unsupported urgency');\n  for (const field of ['location', 'preferred_time']) {\n    if (parsed[field] !== null && (typeof parsed[field] !== 'string' || parsed[field].trim().length > 160)) throw new Error('Invalid optional text');\n  }\n  if (typeof parsed.summary !== 'string' || !parsed.summary.trim() || parsed.summary.length > 600) throw new Error('Invalid summary');\n  enrichment = {\n    service_type: parsed.service_type,\n    location: parsed.location?.trim() || null,\n    preferred_time: parsed.preferred_time?.trim() || null,\n    urgency: parsed.urgency,\n    summary: parsed.summary.trim()\n  };\n  aiStatus = 'enriched';\n  diagnostic = null;\n} catch (error) {\n  aiStatus = result.error ? 'fallback_unavailable' : 'fallback_invalid';\n  diagnostic = aiStatus === 'fallback_invalid' ? 'NVIDIA NIM output failed application schema validation.' : diagnostic;\n}\nreturn [{ json: {\n  crmPayload: { ...lead, enrichment, ai_status: aiStatus, needs_review: aiStatus !== 'enriched', enrichment_diagnostic: diagnostic }\n} }];"
+      },
+      "id": "validate-ai",
+      "name": "Validate AI Extraction",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_ADAPTER_URL + '/api/crm/leads' }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.crmPayload }}",
+        "options": {}
+      },
+      "id": "create-crm",
+      "name": "Create CRM Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        220
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "if ($json.error) {\n  return [{ json: { status_code: 502, response_body: { message: 'We could not process your enquiry. Please try again.' } } }];\n}\nconst crm = $json;\nreturn [{ json: {\n  status_code: 201,\n  response_body: {\n    state: 'accepted',\n    submission_id: crm.submission_id,\n    correlation_id: crm.correlation_id,\n    crm_lead_id: crm.crm_lead_id,\n    ai_status: crm.ai_status\n  }\n} }];"
+      },
+      "id": "build-success",
+      "name": "Build Intake Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response_body }}",
+        "options": {
+          "responseCode": "={{ $json.status_code }}"
+        }
+      },
+      "id": "respond-success",
+      "name": "Return Enquiry Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1920,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  status_code: 422,\n  response_body: { message: 'Please correct the highlighted enquiry details.', errors: $json.errors }\n} }];"
+      },
+      "id": "invalid-response",
+      "name": "Build Validation Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        410
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response_body }}",
+        "options": {
+          "responseCode": "={{ $json.status_code }}"
+        }
+      },
+      "id": "respond-invalid",
+      "name": "Return Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        410
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Receive Enquiry": {
+      "main": [
+        [
+          {
+            "node": "Validate Required Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Required Fields": {
+      "main": [
+        [
+          {
+            "node": "Input Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Valid?": {
+      "main": [
+        [
+          {
+            "node": "Normalize Contact Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Validation Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Contact Data": {
+      "main": [
+        [
+          {
+            "node": "Extract Service Context with NVIDIA NIM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Service Context with NVIDIA NIM": {
+      "main": [
+        [
+          {
+            "node": "Validate AI Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate AI Extraction": {
+      "main": [
+        [
+          {
+            "node": "Create CRM Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CRM Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Intake Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Intake Result": {
+      "main": [
+        [
+          {
+            "node": "Return Enquiry Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Validation Response": {
+      "main": [
+        [
+          {
+            "node": "Return Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "sanitized-phase-1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
