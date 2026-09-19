@@ -2,8 +2,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  acceptIntakeResult,
+  beginIntakeAttempt,
   bookingPendingFor,
   bookingView,
+  confirmationIsSettled,
   pendingFor,
   successView,
   traceView,
@@ -49,6 +52,7 @@ test("only the documented intake contract confirms browser success", () => {
   const payload = {
     submission_id: "09f70a8e-1304-42b9-a1e6-022d2daf4bd6",
     correlation_id: "eeb1b11a-22c8-4a2f-a463-554246c14a16",
+    email: "maya.verma@example.com",
   };
   const valid = {
     state: "accepted",
@@ -81,6 +85,7 @@ test("fallback AI outcomes keep verified intake success but use warning presenta
   const payload = {
     submission_id: "09f70a8e-1304-42b9-a1e6-022d2daf4bd6",
     correlation_id: "eeb1b11a-22c8-4a2f-a463-554246c14a16",
+    email: "maya.verma@example.com",
   };
   const view = successView(
     {
@@ -153,6 +158,7 @@ test("booking success requires the verified lifecycle response", () => {
   const payload = {
     booking_request_id: "09f70a8e-1304-42b9-a1e6-022d2daf4bd6",
     correlation_id: "eeb1b11a-22c8-4a2f-a463-554246c14a16",
+    business_timezone: "America/Vancouver",
   };
   const body = {
     state: "booked",
@@ -169,6 +175,99 @@ test("booking success requires the verified lifecycle response", () => {
   assert.equal(verifiedBooking(body, payload), true);
   assert.equal(bookingView(body, payload).followUpStatus, "cancelled");
   assert.equal(verifiedBooking({ ...body, pipeline_stage: "new_lead" }, payload), false);
+  assert.equal(verifiedBooking({ ...body, appointment_at: undefined }, payload), false);
+  assert.equal(verifiedBooking({ ...body, appointment_at: "2026-10-20Z" }, payload), false);
+  assert.equal(verifiedBooking({ ...body, business_timezone: "Asia/Kolkata" }, payload), false);
+});
+
+test("intake replay accepts truthful contacted, booked, and changed AI state", () => {
+  const payload = {
+    submission_id: "09f70a8e-1304-42b9-a1e6-022d2daf4bd6",
+    correlation_id: "eeb1b11a-22c8-4a2f-a463-554246c14a16",
+    email: "maya.verma@example.com",
+  };
+  const base = {
+    state: "accepted",
+    intake_state: "replayed",
+    crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",
+    ai_status: "fallback_invalid",
+    follow_up_due_at: "2026-09-19T00:02:00Z",
+    ...payload,
+  };
+
+  assert.equal(
+    verifiedSuccess(
+      { ...base, pipeline_stage: "contacted", follow_up_status: "sent" },
+      payload,
+    ),
+    true,
+  );
+  assert.equal(
+    verifiedSuccess(
+      { ...base, pipeline_stage: "appointment_booked", follow_up_status: "cancelled" },
+      payload,
+    ),
+    true,
+  );
+  assert.equal(
+    verifiedSuccess(
+      {
+        ...base,
+        pipeline_stage: "new_lead",
+        follow_up_status: null,
+        follow_up_due_at: null,
+      },
+      payload,
+    ),
+    true,
+  );
+});
+
+test("known booking with unconfirmed notification remains a verified booking", () => {
+  const payload = {
+    booking_request_id: "09f70a8e-1304-42b9-a1e6-022d2daf4bd6",
+    correlation_id: "eeb1b11a-22c8-4a2f-a463-554246c14a16",
+    business_timezone: "America/Vancouver",
+  };
+  const body = {
+    state: "booked",
+    booking_state: "created",
+    appointment_id: "d678189e-db40-46d7-89a5-4bca74dded23",
+    appointment_at: "2026-10-20T17:30:00Z",
+    business_timezone: "America/Vancouver",
+    pipeline_stage: "appointment_booked",
+    follow_up_status: "cancelled",
+    confirmation_state: "unconfirmed",
+    notification_message: "The appointment is saved, but email is unconfirmed.",
+    ...payload,
+  };
+
+  assert.equal(verifiedBooking(body, payload), true);
+  assert.match(bookingView(body, payload).notificationMessage, /saved/i);
+  assert.equal(confirmationIsSettled("unconfirmed"), false);
+  assert.equal(confirmationIsSettled("already_sent"), true);
+});
+
+test("new intake attempts cannot silently retain a previous booking customer", () => {
+  const leadA = {
+    correlationId: "eeb1b11a-22c8-4a2f-a463-554246c14a16",
+    crmLeadId: "d678189e-db40-46d7-89a5-4bca74dded23",
+    fullName: "Lead A",
+  };
+  const leadB = {
+    correlationId: "bd88df3b-1156-483d-a8b1-bf0b73cd66bf",
+    crmLeadId: "108dc96e-1f23-4a56-b6af-f3e49a311459",
+    fullName: "Lead B",
+  };
+  const acceptedA = acceptIntakeResult(leadA);
+  const attemptingB = beginIntakeAttempt(acceptedA);
+  const acceptedB = acceptIntakeResult(leadB);
+
+  assert.equal(attemptingB.acceptedLead, null);
+  assert.equal(attemptingB.bookingPanelVisible, false);
+  assert.equal(attemptingB.bookingResultVisible, false);
+  assert.equal(acceptedB.acceptedLead.correlationId, leadB.correlationId);
+  assert.equal(acceptedB.bookingResultVisible, false);
 });
 
 test("trace view clearly marks fallback records needing review", () => {

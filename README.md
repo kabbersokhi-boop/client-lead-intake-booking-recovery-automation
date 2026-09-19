@@ -30,7 +30,7 @@ PostgreSQL + Pending Follow-up
 - The FastAPI **development CRM adapter** is a small persistence boundary, not GoHighLevel. `DevelopmentCRMProvider` and the future `GoHighLevelCRMProvider` contract keep n8n independent of the eventual CRM vendor.
 - PostgreSQL stores leads, follow-ups, appointments, source and persistence timestamps, and safe audit metadata keyed by correlation ID. Email-capable leads receive one configurable pending follow-up; phone-only leads do not schedule unsupported email work.
 - The booking operation atomically creates one active appointment per lead, moves the pipeline to `appointment_booked`, and cancels a still-pending follow-up. A repeated `booking_request_id` returns the same appointment; a different booking for that lead returns a controlled conflict.
-- Mailpit is a local development SMTP sink, not a real customer email provider. It makes generated follow-up and booking-confirmation messages visible without external delivery.
+- Mailpit is a local development SMTP sink, not a real customer email provider. The actual path is n8n HTTP orchestration → FastAPI development email gateway → SMTP → Mailpit; the public workflows do not use a native n8n SMTP node.
 
 ## Run locally
 
@@ -97,3 +97,5 @@ See [docs/phase-1-verification.md](docs/phase-1-verification.md) for the approve
 - Read endpoints are verification-only and Compose keeps them loopback-only. CORS is not used as authentication; the n8n-to-CRM write route uses the shared adapter credential.
 - Audit metadata intentionally stores only trace and operational state; it never stores secrets.
 - Mailpit data is ephemeral local runtime state and is not committed.
+- Lifecycle row locks prevent ordinary concurrent duplicate sends, but SMTP acceptance and the subsequent PostgreSQL commit are separate effects. A crash or lost acknowledgement between them is not an exactly-once guarantee; uncertain-delivery recovery remains outside Phase 2.
+- Appointments demonstrate durable booking state and timezone handling only. They are not backed by live service capacity or an external calendar.

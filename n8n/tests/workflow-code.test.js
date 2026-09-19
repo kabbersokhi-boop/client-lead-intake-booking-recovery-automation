@@ -88,6 +88,61 @@ test("exported CRM acknowledgement code rejects an unexpected 2xx shape", () => 
   assert.equal(result.status_code, 502);
 });
 
+function buildIntakeResult(crm, expectedOverrides = {}) {
+  return runCode(
+    "Build Intake Result",
+    crm,
+    { "Validate AI Extraction": { crmPayload: { ...lead, ai_status: "enriched", ...expectedOverrides } } },
+  )[0].json;
+}
+
+test("intake acknowledgement separates created and replayed lifecycle invariants", () => {
+  const base = {
+    crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",
+    submission_id: lead.submission_id,
+    correlation_id: lead.correlation_id,
+    ai_status: "enriched",
+    pipeline_stage: "new_lead",
+    follow_up_status: "pending",
+    follow_up_due_at: "2026-09-19T00:02:00Z",
+  };
+  assert.equal(buildIntakeResult({ ...base, intake_state: "created" }).status_code, 201);
+  assert.equal(buildIntakeResult({ ...base, intake_state: "replayed" }).status_code, 200);
+
+  const contacted = buildIntakeResult({
+    ...base,
+    intake_state: "replayed",
+    pipeline_stage: "contacted",
+    follow_up_status: "sent",
+  });
+  const booked = buildIntakeResult({
+    ...base,
+    intake_state: "replayed",
+    pipeline_stage: "appointment_booked",
+    follow_up_status: "cancelled",
+  });
+  assert.equal(contacted.status_code, 200);
+  assert.equal(booked.status_code, 200);
+});
+
+test("intake replay trusts persisted AI state and permits a legacy missing follow-up", () => {
+  const replay = buildIntakeResult(
+    {
+      crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",
+      submission_id: lead.submission_id,
+      correlation_id: lead.correlation_id,
+      intake_state: "replayed",
+      ai_status: "fallback_invalid",
+      pipeline_stage: "new_lead",
+      follow_up_status: null,
+      follow_up_due_at: null,
+    },
+    { ai_status: "enriched" },
+  );
+  assert.equal(replay.status_code, 200);
+  assert.equal(replay.response_body.ai_status, "fallback_invalid");
+});
+
 const bookingWorkflow = require("../appointment-booking.json");
 const bookingNodes = Object.fromEntries(bookingWorkflow.nodes.map((node) => [node.name, node]));
 
@@ -129,14 +184,20 @@ test("booking result accepts created and replayed confirmations without weakenin
     follow_up_status: "cancelled",
     appointment_at: "2026-10-20T17:30:00Z",
     business_timezone: "America/Vancouver",
+    confirmation_state: "pending",
     ...request,
   };
   const result = runBookingCode(
     "Build Booking Result",
-    { state: "sent" },
     {
-      "Create Appointment and Transition Lifecycle": booking,
-      "Validate Booking Request": { request },
+      appointment_id: booking.appointment_id,
+      correlation_id: booking.correlation_id,
+      state: "sent",
+      pipeline_stage: "appointment_booked",
+      sent_at: "2026-09-19T19:10:21Z",
+    },
+    {
+      "Route Appointment Result": { ...booking, proceed: true },
     },
   )[0].json;
 
@@ -145,13 +206,125 @@ test("booking result accepts created and replayed confirmations without weakenin
 });
 
 test("booking routing preserves a controlled backend conflict and stops confirmation", () => {
-  const result = runBookingCode("Route Appointment Result", {
+  const result = routeBooking({
     error: { status: 409, message: "conflict" },
-  })[0].json;
+  });
 
   assert.equal(result.proceed, false);
   assert.equal(result.status_code, 409);
   assert.match(result.response_body.message, /different active appointment/i);
+});
+
+function routeBooking(booking, requestOverrides = {}) {
+  const request = {
+    booking_request_id: "09f70a8e-1304-42b9-a1e6-022d2daf4bd6",
+    correlation_id: "eeb1b11a-22c8-4a2f-a463-554246c14a16",
+    appointment_local: "2026-10-20T10:30",
+    business_timezone: "America/Vancouver",
+    ...requestOverrides,
+  };
+  return runBookingCode(
+    "Route Appointment Result",
+    booking,
+    { "Validate Booking Request": { request } },
+  )[0].json;
+}
+
+function validBookingResponse(overrides = {}) {
+  return {
+    appointment_id: "d678189e-db40-46d7-89a5-4bca74dded23",
+    booking_request_id: "09f70a8e-1304-42b9-a1e6-022d2daf4bd6",
+    correlation_id: "eeb1b11a-22c8-4a2f-a463-554246c14a16",
+    booking_state: "created",
+    appointment_status: "booked",
+    appointment_at: "2026-10-20T17:30:00Z",
+    business_timezone: "America/Vancouver",
+    pipeline_stage: "appointment_booked",
+    follow_up_status: "cancelled",
+    confirmation_state: "pending",
+    ...overrides,
+  };
+}
+
+test("booking routing rejects malformed successful responses before confirmation", () => {
+  for (const response of [
+    {},
+    validBookingResponse({ appointment_at: undefined }),
+    validBookingResponse({ appointment_at: "not-a-date" }),
+    validBookingResponse({ appointment_at: "2026-10-20Z" }),
+    validBookingResponse({ business_timezone: "Asia/Kolkata" }),
+    validBookingResponse({ correlation_id: "bd88df3b-1156-483d-a8b1-bf0b73cd66bf" }),
+    validBookingResponse({ booking_request_id: "bd88df3b-1156-483d-a8b1-bf0b73cd66bf" }),
+  ]) {
+    const routed = routeBooking(response);
+    assert.equal(routed.proceed, false);
+    assert.equal(routed.status_code, 502);
+  }
+});
+
+test("booking routing preserves installed n8n error-envelope business statuses", () => {
+  for (const [status, pattern] of [
+    [404, /could not be found/i],
+    [409, /different active appointment/i],
+    [422, /valid future appointment/i],
+  ]) {
+    const routed = routeBooking({ error: { status, message: `${status} - safe fixture` } });
+    assert.equal(routed.proceed, false);
+    assert.equal(routed.status_code, status);
+    assert.match(routed.response_body.message, pattern);
+  }
+});
+
+test("only the verified booking branch can call confirmation", () => {
+  const outputs = bookingWorkflow.connections["Appointment Created?"].main;
+  assert.equal(outputs[0][0].node, "Send Booking Confirmation Test Email");
+  assert.equal(outputs[1][0].node, "Return Booking Result");
+  assert.equal(routeBooking({}).proceed, false);
+});
+
+test("known booking remains successful when confirmation is unverified", () => {
+  const booking = { ...validBookingResponse(), proceed: true };
+  for (const confirmation of [
+    { error: { status: 503, message: "transport unavailable" } },
+    { state: "sent" },
+    {
+      appointment_id: "bd88df3b-1156-483d-a8b1-bf0b73cd66bf",
+      correlation_id: booking.correlation_id,
+      state: "sent",
+      pipeline_stage: "appointment_booked",
+      sent_at: "2026-09-19T19:10:21Z",
+    },
+  ]) {
+    const result = runBookingCode(
+      "Build Booking Result",
+      confirmation,
+      { "Route Appointment Result": booking },
+    )[0].json;
+    assert.equal(result.status_code, 202);
+    assert.equal(result.response_body.state, "booked");
+    assert.equal(result.response_body.appointment_id, booking.appointment_id);
+    assert.equal(result.response_body.appointment_at, booking.appointment_at);
+    assert.equal(result.response_body.confirmation_state, "unconfirmed");
+  }
+});
+
+test("confirmation success, skip, and replay bind to the verified appointment", () => {
+  const booking = { ...validBookingResponse(), proceed: true };
+  for (const state of ["sent", "already_sent", "skipped_no_email"]) {
+    const result = runBookingCode(
+      "Build Booking Result",
+      {
+        appointment_id: booking.appointment_id,
+        correlation_id: booking.correlation_id,
+        state,
+        pipeline_stage: "appointment_booked",
+        sent_at: state === "skipped_no_email" ? null : "2026-09-19T19:10:21Z",
+      },
+      { "Route Appointment Result": booking },
+    )[0].json;
+    assert.equal(result.status_code, 201);
+    assert.equal(result.response_body.confirmation_state, state);
+  }
 });
 
 const followUpWorkflow = require("../follow-up-dispatch.json");

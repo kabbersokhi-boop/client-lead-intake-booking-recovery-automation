@@ -29,9 +29,15 @@ After a successful submission, the browser displays the returned correlation ID,
 
 ## Lifecycle consistency
 
-Lead creation and initial follow-up scheduling share one transaction. Booking creation, the `appointment_booked` transition, pending-follow-up cancellation, and their audit events share a second transaction. n8n still visibly owns the workflow before and after these operations. SMTP delivery is guarded by durable sent/cancelled state and PostgreSQL row locks for normal replay behavior; Phase 3 recovery queues are deliberately absent.
+Lead creation and initial follow-up scheduling share one transaction. Booking creation, the `appointment_booked` transition, pending-follow-up cancellation, and their audit events share a second transaction. n8n still visibly owns the workflow before and after these operations.
+
+Both booking and follow-up dispatch lock `Lead` and then reload/lock `FollowUp`, giving the lifecycle decision one consistent ordering. If booking commits first, dispatch observes cancellation and does not send. If dispatch owns the decision first, booking waits, then finishes with `appointment_booked`; concurrent dispatches serialize and send once in normal successful operation.
+
+n8n invokes the FastAPI development email boundary over HTTP; FastAPI submits SMTP to Mailpit. SMTP acceptance happens before the database commit that records `sent_at`, so those effects are not universally atomic. Row locks and timestamps cover ordinary successful concurrency and replay, not crashes or lost acknowledgements after SMTP acceptance. No automatic retry is performed inside an aborted SMTP-containing transaction, and Phase 3 recovery queues are deliberately absent.
 
 Appointment input is an offset-free Surrey business-local value with the explicit configured zone `America/Vancouver`. The backend converts it to a canonical timezone-aware instant for storage and rejects unsupported zones or nonexistent local wall times.
+
+The appointment record is a synthetic durable booking-state demonstration. It does not assert real service availability or reserve capacity in an external calendar.
 
 ## Failure behavior
 

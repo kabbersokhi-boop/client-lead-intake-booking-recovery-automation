@@ -16,6 +16,7 @@ from app.schemas.lead import (
     TraceResponse,
 )
 from app.schemas.lifecycle import (
+    BookingConfirmationResponse,
     BookingCreate,
     BookingCreateResponse,
     EmailDispatchResponse,
@@ -139,13 +140,13 @@ def create_booking(
 
 @router.post(
     "/api/crm/appointments/{appointment_id}/confirmation",
-    response_model=EmailDispatchResponse,
+    response_model=BookingConfirmationResponse,
 )
 def send_booking_confirmation(
     appointment_id: uuid.UUID,
     _: None = Depends(require_crm_adapter_key),
     db: Session = Depends(get_db),
-) -> EmailDispatchResponse:
+) -> BookingConfirmationResponse:
     try:
         result = lifecycle_service.send_booking_confirmation(db, appointment_id)
     except LookupError as error:
@@ -153,8 +154,13 @@ def send_booking_confirmation(
     except EmailDeliveryError as error:
         db.rollback()
         raise HTTPException(status_code=503, detail=str(error)) from error
-    return EmailDispatchResponse(
-        state=result.state, pipeline_stage=result.pipeline_stage, sent_at=result.sent_at
+    appointment = db.get(Appointment, appointment_id)
+    return BookingConfirmationResponse(
+        appointment_id=appointment.id,
+        correlation_id=appointment.correlation_id,
+        state=result.state,
+        pipeline_stage=result.pipeline_stage,
+        sent_at=result.sent_at,
     )
 
 

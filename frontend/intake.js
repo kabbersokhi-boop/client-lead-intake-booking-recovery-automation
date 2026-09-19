@@ -38,17 +38,40 @@
   }
 
   function verifiedSuccess(body, payload) {
-    return Boolean(
-      body &&
-        body.state === "accepted" &&
-        SUCCESS_STATES.has(body.intake_state) &&
-        AI_STATUSES.has(body.ai_status) &&
-        UUID_RE.test(body.crm_lead_id || "") &&
+    if (
+      !body ||
+      body.state !== "accepted" ||
+      !SUCCESS_STATES.has(body.intake_state) ||
+      !AI_STATUSES.has(body.ai_status) ||
+      !UUID_RE.test(body.crm_lead_id || "") ||
+      body.submission_id !== payload.submission_id ||
+      body.correlation_id !== payload.correlation_id
+    ) {
+      return false;
+    }
+    const followUpValid =
+      body.follow_up_status === null
+        ? body.follow_up_due_at === null
+        : ["pending", "sent", "cancelled"].includes(body.follow_up_status) &&
+          typeof body.follow_up_due_at === "string" &&
+          !Number.isNaN(Date.parse(body.follow_up_due_at));
+    if (!followUpValid) return false;
+    if (body.intake_state === "created") {
+      return (
         body.pipeline_stage === "new_lead" &&
-        (body.follow_up_status === "pending" || body.follow_up_status === null) &&
-        body.submission_id === payload.submission_id &&
-        body.correlation_id === payload.correlation_id,
-    );
+        (payload.email ? body.follow_up_status === "pending" : body.follow_up_status === null)
+      );
+    }
+    if (!["new_lead", "contacted", "appointment_booked"].includes(body.pipeline_stage)) {
+      return false;
+    }
+    if (body.pipeline_stage === "contacted") {
+      return body.follow_up_status === "sent" || body.follow_up_status === null;
+    }
+    if (body.pipeline_stage === "appointment_booked") {
+      return ["sent", "cancelled", null].includes(body.follow_up_status);
+    }
+    return ["pending", null].includes(body.follow_up_status);
   }
 
   function successView(body, payload) {
@@ -102,7 +125,16 @@
         body.booking_request_id === payload.booking_request_id &&
         body.correlation_id === payload.correlation_id &&
         body.pipeline_stage === "appointment_booked" &&
-        ["sent", "already_sent", "skipped_no_email"].includes(body.confirmation_state),
+        ["sent", "already_sent", "skipped_no_email", "unconfirmed"].includes(
+          body.confirmation_state,
+        ) &&
+        ["sent", "cancelled", null].includes(body.follow_up_status) &&
+        typeof body.appointment_at === "string" &&
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+          body.appointment_at,
+        ) &&
+        !Number.isNaN(Date.parse(body.appointment_at)) &&
+        body.business_timezone === payload.business_timezone,
     );
   }
 
@@ -116,7 +148,30 @@
       pipelineStage: body.pipeline_stage,
       followUpStatus: body.follow_up_status || "not scheduled",
       confirmationState: body.confirmation_state,
+      notificationMessage: body.notification_message || null,
     };
+  }
+
+  function beginIntakeAttempt() {
+    return {
+      acceptedLead: null,
+      intakeResultVisible: false,
+      bookingPanelVisible: false,
+      bookingResultVisible: false,
+    };
+  }
+
+  function acceptIntakeResult(lead) {
+    return {
+      acceptedLead: { ...lead },
+      intakeResultVisible: true,
+      bookingPanelVisible: true,
+      bookingResultVisible: false,
+    };
+  }
+
+  function confirmationIsSettled(confirmationState) {
+    return ["sent", "already_sent", "skipped_no_email"].includes(confirmationState);
   }
 
   function traceView(trace) {
@@ -158,8 +213,11 @@
   }
 
   const api = {
+    acceptIntakeResult,
+    beginIntakeAttempt,
     bookingPendingFor,
     bookingView,
+    confirmationIsSettled,
     fetchWithTimeout,
     pendingFor,
     sameSnapshot,

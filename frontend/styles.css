@@ -64,6 +64,7 @@ dd { color: #283650; font-size: .91rem; font-weight: 650; margin: 0; overflow-wr
 .booking-panel[hidden], .booking-result[hidden] { display: none; }
 .booking-panel > h3 { font-size: 1.08rem; margin: 0; }
 .booking-panel > p:not(.result-kicker) { color: #56647c; font-size: .88rem; line-height: 1.45; margin: 6px 0 16px; }
+.booking-panel .booking-customer-reference { background: #e8eeff; border-radius: 8px; color: #29489e; font-weight: 700; padding: 9px 10px; }
 .booking-panel form { gap: 13px; }
 #booking-status { color: #56647c; font-size: .88rem; margin: 0; min-height: 1.3em; }
 #booking-status.success { color: #147047; }

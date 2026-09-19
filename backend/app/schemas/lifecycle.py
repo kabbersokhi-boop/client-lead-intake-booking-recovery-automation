@@ -1,8 +1,11 @@
+import re
 import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+LOCAL_MINUTE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
 
 
 class FollowUpStatus(StrEnum):
@@ -56,10 +59,19 @@ class BookingCreate(BaseModel):
     appointment_local: datetime
     business_timezone: str = Field(min_length=1, max_length=80)
 
+    @field_validator("appointment_local", mode="before")
+    @classmethod
+    def appointment_uses_minute_precision(cls, value: object) -> object:
+        if isinstance(value, str) and not LOCAL_MINUTE_RE.fullmatch(value):
+            raise ValueError("appointment_local must use YYYY-MM-DDTHH:MM minute precision")
+        return value
+
     @model_validator(mode="after")
     def local_time_must_not_have_an_offset(self):
         if self.appointment_local.tzinfo is not None:
             raise ValueError("appointment_local must be a business-local time without an offset")
+        if self.appointment_local.second or self.appointment_local.microsecond:
+            raise ValueError("appointment_local must use minute precision")
         return self
 
 
@@ -77,6 +89,14 @@ class BookingCreateResponse(BaseModel):
 
 
 class EmailDispatchResponse(BaseModel):
+    state: str
+    pipeline_stage: PipelineStage
+    sent_at: datetime | None = None
+
+
+class BookingConfirmationResponse(BaseModel):
+    appointment_id: uuid.UUID
+    correlation_id: uuid.UUID
     state: str
     pipeline_stage: PipelineStage
     sent_at: datetime | None = None

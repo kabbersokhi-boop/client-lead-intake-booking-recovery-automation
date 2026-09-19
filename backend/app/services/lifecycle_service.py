@@ -85,12 +85,18 @@ class LifecycleService:
         return list(db.scalars(statement))
 
     def dispatch_follow_up(self, db: Session, follow_up_id: uuid.UUID) -> DispatchResult:
+        lead_id = db.scalar(select(FollowUp.lead_id).where(FollowUp.id == follow_up_id))
+        if not lead_id:
+            raise LookupError("Follow-up not found")
+        lead = db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update())
         follow_up = db.scalar(
-            select(FollowUp).where(FollowUp.id == follow_up_id).with_for_update()
+            select(FollowUp)
+            .where(FollowUp.id == follow_up_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if not follow_up:
             raise LookupError("Follow-up not found")
-        lead = db.get(Lead, follow_up.lead_id)
         if follow_up.status != "pending":
             return DispatchResult(follow_up.status, lead.pipeline_stage, follow_up.sent_at)
         due_at = follow_up.due_at

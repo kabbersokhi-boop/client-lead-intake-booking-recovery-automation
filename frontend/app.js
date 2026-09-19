@@ -13,12 +13,14 @@ const resultFollowUpStatus = document.querySelector("#result-follow-up-status");
 const resultFollowUpDue = document.querySelector("#result-follow-up-due");
 const inspectTraceButton = document.querySelector("#inspect-trace");
 const bookingPanel = document.querySelector("#booking-panel");
+const bookingCustomerReference = document.querySelector("#booking-customer-reference");
 const bookingForm = document.querySelector("#booking-form");
 const bookingSubmitButton = bookingForm.querySelector("button[type=submit]");
 const bookingStatus = document.querySelector("#booking-status");
 const bookingResult = document.querySelector("#booking-result");
 const bookingResultTitle = document.querySelector("#booking-result-title");
 const bookingAppointmentId = document.querySelector("#booking-appointment-id");
+const bookingAppointmentTime = document.querySelector("#booking-appointment-time");
 const bookingPipelineStage = document.querySelector("#booking-pipeline-stage");
 const bookingFollowUpStatus = document.querySelector("#booking-follow-up-status");
 const bookingConfirmationState = document.querySelector("#booking-confirmation-state");
@@ -30,6 +32,7 @@ const traceRaw = document.querySelector("#trace-raw");
 const pendingStorageKey = "lead-intake-pending-v1";
 const pendingBookingStorageKey = "lead-booking-pending-v1";
 let acceptedLead = null;
+let lifecycleUiState = window.LeadIntake.beginIntakeAttempt();
 
 const sampleLead = {
   full_name: "Maya Verma",
@@ -84,6 +87,21 @@ function requestError(body, fallback) {
   return body && typeof body.message === "string" ? body.message : fallback;
 }
 
+function beginNewIntakeAttempt() {
+  lifecycleUiState = window.LeadIntake.beginIntakeAttempt(lifecycleUiState);
+  acceptedLead = null;
+  intakeResult.hidden = true;
+  bookingPanel.hidden = true;
+  bookingResult.hidden = true;
+  bookingStatus.className = "";
+  bookingStatus.textContent = "";
+  bookingCustomerReference.textContent = "";
+  traceSummary.replaceChildren();
+  technicalDetails.hidden = true;
+  traceRaw.textContent = "";
+  traceId.value = "";
+}
+
 function renderVerifiedResult(body, payload) {
   const view = window.LeadIntake.successView(body, payload);
   if (!view) return false;
@@ -96,9 +114,19 @@ function renderVerifiedResult(body, payload) {
   resultFollowUpDue.textContent = formatBusinessTime(view.followUpDueAt);
   resultAiStatus.textContent = `AI: ${view.aiStatus}`;
   resultAiStatus.className = `status-chip status-chip--${view.aiStatusTone}`;
-  intakeResult.hidden = false;
-  acceptedLead = { correlationId: view.correlationId, crmLeadId: view.crmLeadId };
-  bookingPanel.hidden = false;
+  lifecycleUiState = window.LeadIntake.acceptIntakeResult({
+    correlationId: view.correlationId,
+    crmLeadId: view.crmLeadId,
+    fullName: payload.full_name,
+  });
+  acceptedLead = lifecycleUiState.acceptedLead;
+  intakeResult.hidden = !lifecycleUiState.intakeResultVisible;
+  bookingPanel.hidden = !lifecycleUiState.bookingPanelVisible;
+  bookingResult.hidden = true;
+  bookingForm.reset();
+  bookingStatus.className = "";
+  bookingStatus.textContent = "";
+  bookingCustomerReference.textContent = `Booking for ${acceptedLead.fullName} · ${acceptedLead.correlationId}`;
   return true;
 }
 
@@ -229,13 +257,20 @@ bookingForm.addEventListener("submit", async (event) => {
     if (!view) throw new Error("The saved appointment response could not be verified.");
     bookingResultTitle.textContent = view.title;
     bookingAppointmentId.textContent = view.appointmentId;
+    bookingAppointmentTime.textContent = formatBusinessTime(
+      view.appointmentAt,
+      view.businessTimezone,
+    );
     bookingPipelineStage.textContent = view.pipelineStage;
     bookingFollowUpStatus.textContent = view.followUpStatus;
     bookingConfirmationState.textContent = view.confirmationState;
     bookingResult.hidden = false;
-    bookingStatus.className = "success";
-    bookingStatus.textContent = "The booking and confirmation response were verified.";
-    sessionStorage.removeItem(pendingBookingStorageKey);
+    bookingStatus.className = view.confirmationState === "unconfirmed" ? "" : "success";
+    bookingStatus.textContent =
+      view.notificationMessage || "The booking and confirmation response were verified.";
+    if (window.LeadIntake.confirmationIsSettled(view.confirmationState)) {
+      sessionStorage.removeItem(pendingBookingStorageKey);
+    }
     traceId.value = body.correlation_id;
   } catch (error) {
     bookingStatus.className = "error";
@@ -255,6 +290,7 @@ inspectTraceButton.addEventListener("click", () => {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  beginNewIntakeAttempt();
   status.className = "";
   status.textContent = "";
   submitButton.disabled = true;

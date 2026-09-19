@@ -79,6 +79,7 @@
               <p class="result-kicker">Next lifecycle step</p>
               <h3>Book a synthetic appointment</h3>
               <p>Times are entered and displayed in Surrey business time (America/Vancouver).</p>
+              <p id="booking-customer-reference" class="booking-customer-reference"></p>
               <form id="booking-form">
                 <label>Appointment date and time<input id="appointment-local" name="appointment_local" type="datetime-local" required /></label>
                 <button type="submit">Book Test Appointment</button>
@@ -88,6 +89,7 @@
                 <h3 id="booking-result-title"></h3>
                 <dl class="result-grid">
                   <div><dt>Appointment ID</dt><dd id="booking-appointment-id" class="identifier"></dd></div>
+                  <div><dt>Appointment time</dt><dd id="booking-appointment-time"></dd></div>
                   <div><dt>Pipeline stage</dt><dd id="booking-pipeline-stage"></dd></div>
                   <div><dt>Follow-up</dt><dd id="booking-follow-up-status"></dd></div>
                   <div><dt>Confirmation email</dt><dd id="booking-confirmation-state"></dd></div>

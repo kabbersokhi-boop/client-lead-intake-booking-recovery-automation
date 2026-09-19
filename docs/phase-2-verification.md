@@ -66,3 +66,44 @@ No browser automation binary was used. The browser helper logic is deterministic
 ## Development-only and excluded
 
 The CRM adapter, synthetic appointment calendar, read-only trace UI, short follow-up delay, and Mailpit delivery are development/demo components. No GoHighLevel, Make.com, external email, calendar provider, SMS/WhatsApp, recovery queue, deliberate failure injection, or other Phase 3 feature was implemented.
+
+## Review correction verification
+
+The following checks were run after the Phase 2 review corrections. They supplement rather than replace the original evidence above.
+
+### Lifecycle replay contracts
+
+- Scenario A correction correlation: `bd4ce7ca-b15c-4c6a-9bb1-48923ab5235f`.
+- Scenario B correction correlation: `f66046a0-fbb2-4eaa-b8c7-6e4f8397edaa`.
+- Scenario B booking request: `f78df2e5-ed92-4704-9562-8d8d97c5ed64`; appointment: `b8d8511b-3b4f-411b-b91f-528ccc0fbc25`.
+
+n8n execution `188` created Scenario A with safe `fallback_invalid`, `new_lead`, and a pending follow-up. Scheduled execution `196` sent that follow-up and moved the pipeline to `contacted`. Execution `197` replayed the exact original intake after contact and returned HTTP 200 with the same lead, persisted `fallback_invalid`, `contacted`, and `sent` state.
+
+n8n execution `190` created Scenario B with live successful NVIDIA enrichment. Execution `191` booked the appointment, moved the pipeline to `appointment_booked`, cancelled the pending follow-up, and sent one confirmation. Execution `192` replayed the exact original intake after booking and returned HTTP 200 with the same lead, persisted `enriched`, `appointment_booked`, and `cancelled` state. Execution `193` replayed the booking with the same appointment ID and `confirmation_state=already_sent`.
+
+Mailpit contained two messages before these correction scenarios, three after Scenario B confirmation, and four after Scenario A dispatch. Both intake replays and the booking replay left the count at four. The scheduled dispatcher also passed Scenario B's cancelled due time without sending.
+
+These results do not rewrite the earlier Phase 2 NVIDIA record: the original two Phase 2 calls remain `fallback_invalid`. In the correction run, Scenario A was `fallback_invalid` because output failed application schema validation, while Scenario B was enriched. Neither result is described as an entitlement failure.
+
+### Response and error boundaries
+
+The installed n8n `2.39.8` error envelope was exercised through a real past-date booking request. The backend HTTP 422 was preserved by n8n as HTTP 422 with a safe business-time validation message, and Mailpit did not change.
+
+Executable workflow fixtures additionally verify that malformed successful booking bodies, missing or invalid canonical appointment timestamps, wrong timezones, and identity mismatches stop before the confirmation branch. Backend 404/409/422 statuses retain controlled user-facing responses. Once an appointment response is verified, a confirmation transport or response-validation failure returns the known appointment ID/time with `confirmation_state=unconfirmed` rather than claiming booking failure. The same booking may retry that existing confirmation boundary; no recovery queue was added.
+
+### PostgreSQL concurrency
+
+A deterministic disposable-PostgreSQL coordination test reproduced the pre-fix lock inversion as `DeadlockDetected`; this was a local test reproduction, not a previously observed client incident. The repaired implementation locks `Lead` first, then reloads and locks `FollowUp` before deciding whether email may send.
+
+Four coordinated PostgreSQL tests now pass with bounded event waits:
+
+- booking owns the lifecycle decision first, so later dispatch observes `cancelled` and sends zero messages;
+- dispatch owns it first, sends once, then booking finishes with final pipeline `appointment_booked`;
+- two dispatchers send one message;
+- two booking-confirmation requests send one message and the second returns `already_sent`.
+
+SMTP acceptance and the later database commit remain separate effects. The lock tests prove normal successful serialization, not universal exactly-once delivery after a crash or lost acknowledgement. The code does not blindly retry an aborted SMTP-containing transaction; uncertain-delivery recovery remains outside Phase 2.
+
+### Browser state boundary
+
+Browser-helper tests verify that beginning lead B clears lead A as the accepted booking target and hides A's booking result, while successful acceptance of B binds the booking context to B and keeps A's old result hidden. Pending request records in `sessionStorage` are retained for idempotent matching rather than discarded. The live assets were served, but the lead-A/failed-lead-B visual sequence still requires a human browser layout check.
