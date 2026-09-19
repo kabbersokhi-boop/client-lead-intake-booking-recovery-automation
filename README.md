@@ -42,13 +42,13 @@ FastAPI CRM Integration Boundary
    ```text
    NVIDIA_NIM_API_KEY=<rotated key in protected runtime storage>
    NVIDIA_NIM_MODEL=<one currently enabled NVIDIA model ID>
-   NVIDIA_NIM_TIMEOUT_MS=10000
+   NVIDIA_NIM_TIMEOUT_MS=18000
    CRM_ADAPTER_API_KEY=<same locally generated adapter key>
-   CRM_ADAPTER_TIMEOUT_MS=8000
+   CRM_ADAPTER_TIMEOUT_MS=6000
    CRM_ADAPTER_URL=http://backend:8000
    ```
 
-   When n8n is a separate Docker container, attach it to the Compose network and use `http://backend:8000`; this preserves private container-to-container access while both editor and browser-facing backend stay loopback-bound. The CRM write endpoint requires `X-CRM-Adapter-Key`; the workflow supplies it from n8n runtime configuration. The workflow returns CORS headers for `http://localhost:18000` and the browser uses JSON requests with a 15-second configurable acknowledgement timeout.
+   When n8n is a separate Docker container, attach it to the Compose network and use `http://backend:8000`; this preserves private container-to-container access while both editor and browser-facing backend stay loopback-bound. The CRM write endpoint requires `X-CRM-Adapter-Key`; the workflow supplies it from n8n runtime configuration. The workflow returns CORS headers for `http://localhost:18000` and the browser uses JSON requests with a 30-second configurable acknowledgement timeout.
 
 4. Import `n8n/lead-intake.json` in n8n, activate it, and use the production webhook URL shown by n8n. Put that URL in `N8N_WEBHOOK_URL` before starting the backend. The export has no credentials or credential references: NVIDIA uses the n8n environment variable directly.
 
@@ -75,7 +75,7 @@ Tests use SQLite for fast API/schema tests and disposable PostgreSQL for migrati
 
 ## Live verification
 
-See [docs/phase-1-verification.md](docs/phase-1-verification.md) for executed evidence and unexecuted checks. A real n8n webhook execution has verified the safe fallback-to-persistence path. A successful live NVIDIA enrichment is **not** claimed; see the sanitized [provider diagnostic record](docs/provider-diagnostics.md).
+See [docs/phase-1-verification.md](docs/phase-1-verification.md) for executed evidence and unexecuted checks. Real n8n executions have verified both safe fallback-to-persistence and successful live NVIDIA enrichment; see the sanitized [provider diagnostic record](docs/provider-diagnostics.md).
 
 ## Security
 

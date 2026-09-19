@@ -22,6 +22,15 @@ def test_sanitized_workflow_has_required_safety_controls():
     assert "fallback_invalid" in ai_validation_code
     assert "fallback_unavailable" in ai_validation_code
 
+    nvidia_request = nodes["Extract Service Context with NVIDIA NIM"]["parameters"]
+    assert nvidia_request["options"]["timeout"] == (
+        "={{ Number($env.NVIDIA_NIM_TIMEOUT_MS || 18000) }}"
+    )
+    assert "max_tokens: 180" in nvidia_request["jsonBody"]
+
+    crm_request = nodes["Create CRM Lead"]["parameters"]
+    assert crm_request["options"]["timeout"] == "={{ Number($env.CRM_ADAPTER_TIMEOUT_MS || 6000) }}"
+
     success_options = nodes["Return Enquiry Result"]["parameters"]["options"]
     headers = success_options["responseHeaders"]["entries"]
     response_headers = {header["name"]: header["value"] for header in headers}

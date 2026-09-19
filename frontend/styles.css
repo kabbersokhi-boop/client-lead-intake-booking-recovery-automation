@@ -51,7 +51,9 @@ button:disabled { cursor: wait; opacity: .65; }
 .result-heading { align-items: center; }
 .result-kicker { color: #3159c8; font-size: .74rem; font-weight: 800; letter-spacing: .1em; margin: 0 0 4px; text-transform: uppercase; }
 .result-heading h3 { font-size: 1.12rem; margin: 0; }
-.status-chip { background: #dff6e8; border: 1px solid #9bd5b1; border-radius: 999px; color: #176a43; font-size: .76rem; font-weight: 800; padding: 5px 9px; text-transform: lowercase; }
+.status-chip { border: 1px solid transparent; border-radius: 999px; font-size: .76rem; font-weight: 800; padding: 5px 9px; text-transform: lowercase; }
+.status-chip--success { background: #dff6e8; border-color: #9bd5b1; color: #176a43; }
+.status-chip--warning { background: #fff3d5; border-color: #e8c66a; color: #795600; }
 .result-grid, .trace-grid { display: grid; gap: 13px 18px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 18px 0; }
 .result-grid div, .trace-grid div { min-width: 0; }
 dt { color: #65738b; font-size: .73rem; font-weight: 800; letter-spacing: .05em; margin-bottom: 4px; text-transform: uppercase; }

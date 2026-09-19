@@ -57,6 +57,7 @@ function renderVerifiedResult(body, payload) {
   resultCorrelationId.textContent = view.correlationId;
   resultCrmLeadId.textContent = view.crmLeadId;
   resultAiStatus.textContent = `AI: ${view.aiStatus}`;
+  resultAiStatus.className = `status-chip status-chip--${view.aiStatusTone}`;
   intakeResult.hidden = false;
   return true;
 }
@@ -93,6 +94,7 @@ function renderTrace(trace) {
     ["Urgency", view.urgency],
     ["Preferred time", view.preferredTime],
     ["AI status", view.aiStatus],
+    ["Needs review", view.needsReview ? "Yes — review required" : "No"],
     ["Client received", view.clientReceivedAt],
     ["Persisted", view.persistedAt],
   ].forEach(([label, value]) => appendTraceField(fields, label, value));

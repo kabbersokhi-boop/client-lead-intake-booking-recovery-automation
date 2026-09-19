@@ -56,6 +56,7 @@
       correlationId: body.correlation_id,
       crmLeadId: body.crm_lead_id,
       aiStatus: body.ai_status,
+      aiStatusTone: body.ai_status === "enriched" ? "success" : "warning",
     };
   }
 
@@ -70,6 +71,7 @@
       urgency: lead.urgency || "Not enriched",
       preferredTime: lead.preferred_time || "Not provided",
       aiStatus: lead.ai_status || "Not available",
+      needsReview: lead.needs_review === true,
       clientReceivedAt: lead.client_received_at || "Not available",
       persistedAt: lead.created_at || "Not available",
       audits: Array.isArray(trace.audit_events) ? trace.audit_events : [],

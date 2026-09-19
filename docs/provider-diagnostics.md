@@ -36,6 +36,36 @@ The direct request used synthetic text only. Neither request stored or exposed
 an authorization header, token, or API key in repository files, workflow
 exports, documentation, or browser content.
 
+## Timeout evidence and corrected request budget
+
+| Field | Execution `146` observation |
+| --- | --- |
+| Caller | n8n workflow request |
+| Model ID | `openai/gpt-oss-20b` |
+| Start / stop | `2026-09-19T18:32:42.674Z` / `2026-09-19T18:32:52.771Z` |
+| Elapsed | `10.097` seconds |
+| Sanitized error | `ECONNABORTED` |
+| Confirmed cause | The runtime had no NVIDIA timeout override, so the workflow's `10,000` ms default aborted the request. |
+| Persistence result | Safe fallback persisted the lead; the workflow execution itself completed successfully. |
+
+Three direct minimal synthetic requests completed in approximately `1.71`,
+`5.23`, and `12.35` seconds. A synthetic request with `max_tokens=180`
+returned HTTP `200` and schema-valid output in approximately `14.94` seconds.
+The deployed workflow now uses `max_tokens=180` and an NVIDIA timeout of
+`18,000` ms. The CRM timeout is `6,000` ms and the browser acknowledgement
+budget is `30,000` ms, leaving explicit headroom while retaining fallback.
+
+## Corrected live execution
+
+| Field | Value |
+| --- | --- |
+| Caller | n8n execution `149` |
+| Model ID | `openai/gpt-oss-20b` |
+| Result | HTTP `201` intake response; `ai_status=enriched` |
+| Validated extraction | `furnace_service`, `Surrey`, `Tuesday afternoon`, `medium` |
+| Correlation ID | `f3dd6910-0aa8-4bfa-b281-46752617014f` |
+| CRM / audit result | Lead `5c59bd59-1e12-41b4-a09e-dc40148649f8` persisted with one creation audit event. |
+
 ## Historical fallback observation
 
 | Field | Value |
