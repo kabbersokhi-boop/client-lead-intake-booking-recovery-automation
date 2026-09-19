@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.api.routes import get_lead, get_trace, list_audit_events, list_leads
-from app.models import AuditEvent
+from app.models import AuditEvent, Lead
 from app.providers.crm import DevelopmentCRMProvider
 from app.schemas.lead import CRMLeadCreate
 
@@ -85,3 +85,15 @@ def test_safe_ai_fallback_persists_lead_for_review(db, ai_status):
     assert persisted.ai_status == ai_status
     assert persisted.needs_review is True
     assert persisted.summary is None
+
+
+def test_submission_id_is_idempotent(db):
+    request = CRMLeadCreate.model_validate(payload())
+    provider = DevelopmentCRMProvider()
+
+    first = provider.create_lead(db, request)
+    second = provider.create_lead(db, request)
+
+    assert first.id == second.id
+    assert len(list(db.scalars(select(Lead)))) == 1
+    assert len(list(db.scalars(select(AuditEvent)))) == 1
