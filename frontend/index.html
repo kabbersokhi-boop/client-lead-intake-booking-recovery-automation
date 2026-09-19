@@ -14,8 +14,8 @@
           <div>
             <h1>Website Lead Intake</h1>
             <p>
-              Create a synthetic customer enquiry and follow it through validation, AI
-              enrichment, CRM persistence and traceable audit history.
+              Create a synthetic customer enquiry, schedule its follow-up, and trace it
+              through booking or contact in a controlled lifecycle demonstration.
             </p>
           </div>
           <p class="source-label">Demo source: Website enquiry</p>
@@ -31,10 +31,11 @@
             <li><span>2</span>Customer data is validated and normalized</li>
             <li><span>3</span>NVIDIA NIM extracts structured service context</li>
             <li><span>4</span>The development CRM adapter persists the lead</li>
-            <li><span>5</span>A correlation ID traces the complete intake</li>
+            <li><span>5</span>A follow-up is scheduled for email-capable leads</li>
+            <li><span>6</span>Booking cancels that follow-up and confirms the appointment</li>
           </ol>
           <div class="flow" aria-label="Automation flow">
-            <span>Website</span><b>→</b><span>n8n</span><b>→</b><span>AI enrichment</span><b>→</b><span>CRM</span><b>→</b><span>PostgreSQL</span>
+            <span>Website</span><b>→</b><span>n8n</span><b>→</b><span>AI enrichment</span><b>→</b><span>CRM lifecycle</span><b>→</b><span>Mailpit</span>
           </div>
           <p class="fallback-note">
             AI enrichment has a safe fallback; lead intake does not depend on AI availability.
@@ -69,8 +70,30 @@
               <div><dt>Intake state</dt><dd id="result-intake-state"></dd></div>
               <div><dt>Correlation ID</dt><dd id="result-correlation-id" class="identifier"></dd></div>
               <div><dt>CRM Lead ID</dt><dd id="result-crm-lead-id" class="identifier"></dd></div>
+              <div><dt>Pipeline stage</dt><dd id="result-pipeline-stage"></dd></div>
+              <div><dt>Follow-up</dt><dd id="result-follow-up-status"></dd></div>
+              <div><dt>Follow-up due</dt><dd id="result-follow-up-due"></dd></div>
             </dl>
             <button id="inspect-trace" class="secondary" type="button">Inspect persisted trace</button>
+            <section id="booking-panel" class="booking-panel" hidden>
+              <p class="result-kicker">Next lifecycle step</p>
+              <h3>Book a synthetic appointment</h3>
+              <p>Times are entered and displayed in Surrey business time (America/Vancouver).</p>
+              <form id="booking-form">
+                <label>Appointment date and time<input id="appointment-local" name="appointment_local" type="datetime-local" required /></label>
+                <button type="submit">Book Test Appointment</button>
+                <p id="booking-status" role="status" aria-live="polite"></p>
+              </form>
+              <article id="booking-result" class="booking-result" hidden>
+                <h3 id="booking-result-title"></h3>
+                <dl class="result-grid">
+                  <div><dt>Appointment ID</dt><dd id="booking-appointment-id" class="identifier"></dd></div>
+                  <div><dt>Pipeline stage</dt><dd id="booking-pipeline-stage"></dd></div>
+                  <div><dt>Follow-up</dt><dd id="booking-follow-up-status"></dd></div>
+                  <div><dt>Confirmation email</dt><dd id="booking-confirmation-state"></dd></div>
+                </dl>
+              </article>
+            </section>
           </section>
         </section>
       </div>
@@ -81,7 +104,7 @@
             <p class="eyebrow">Verification</p>
             <h2 id="trace-title">Persisted lead trace</h2>
           </div>
-          <p>Inspect the development CRM adapter record and safe audit history by correlation ID.</p>
+          <p>Inspect lead, follow-up, appointment, and safe audit state by correlation ID.</p>
         </div>
         <form id="trace-form" class="trace-form">
           <label>Correlation ID<input id="trace-id" name="correlation_id" autocomplete="off" required /></label>

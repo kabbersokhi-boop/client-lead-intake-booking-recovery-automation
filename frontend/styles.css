@@ -60,6 +60,17 @@ dt { color: #65738b; font-size: .73rem; font-weight: 800; letter-spacing: .05em;
 dd { color: #283650; font-size: .91rem; font-weight: 650; margin: 0; overflow-wrap: anywhere; }
 .identifier { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .79rem; }
 .intake-result .secondary { width: 100%; }
+.booking-panel { border-top: 1px solid #cfdbf2; margin-top: 20px; padding-top: 20px; }
+.booking-panel[hidden], .booking-result[hidden] { display: none; }
+.booking-panel > h3 { font-size: 1.08rem; margin: 0; }
+.booking-panel > p:not(.result-kicker) { color: #56647c; font-size: .88rem; line-height: 1.45; margin: 6px 0 16px; }
+.booking-panel form { gap: 13px; }
+#booking-status { color: #56647c; font-size: .88rem; margin: 0; min-height: 1.3em; }
+#booking-status.success { color: #147047; }
+#booking-status.error { color: #ba3028; }
+.booking-result { background: #fff; border: 1px solid #b8d9c6; border-radius: 10px; margin-top: 16px; padding: 15px; }
+.booking-result h3 { color: #176a43; font-size: 1rem; margin: 0; }
+.booking-result .result-grid { margin-bottom: 0; }
 
 .trace-card { margin-top: 24px; padding: 29px; }
 .trace-heading { margin-bottom: 20px; }

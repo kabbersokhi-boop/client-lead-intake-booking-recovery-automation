@@ -8,13 +8,28 @@ const resultIntakeState = document.querySelector("#result-intake-state");
 const resultCorrelationId = document.querySelector("#result-correlation-id");
 const resultCrmLeadId = document.querySelector("#result-crm-lead-id");
 const resultAiStatus = document.querySelector("#result-ai-status");
+const resultPipelineStage = document.querySelector("#result-pipeline-stage");
+const resultFollowUpStatus = document.querySelector("#result-follow-up-status");
+const resultFollowUpDue = document.querySelector("#result-follow-up-due");
 const inspectTraceButton = document.querySelector("#inspect-trace");
+const bookingPanel = document.querySelector("#booking-panel");
+const bookingForm = document.querySelector("#booking-form");
+const bookingSubmitButton = bookingForm.querySelector("button[type=submit]");
+const bookingStatus = document.querySelector("#booking-status");
+const bookingResult = document.querySelector("#booking-result");
+const bookingResultTitle = document.querySelector("#booking-result-title");
+const bookingAppointmentId = document.querySelector("#booking-appointment-id");
+const bookingPipelineStage = document.querySelector("#booking-pipeline-stage");
+const bookingFollowUpStatus = document.querySelector("#booking-follow-up-status");
+const bookingConfirmationState = document.querySelector("#booking-confirmation-state");
 const traceForm = document.querySelector("#trace-form");
 const traceId = document.querySelector("#trace-id");
 const traceSummary = document.querySelector("#trace-summary");
 const technicalDetails = document.querySelector("#technical-details");
 const traceRaw = document.querySelector("#trace-raw");
 const pendingStorageKey = "lead-intake-pending-v1";
+const pendingBookingStorageKey = "lead-booking-pending-v1";
+let acceptedLead = null;
 
 const sampleLead = {
   full_name: "Maya Verma",
@@ -45,6 +60,26 @@ function clearPending() {
   sessionStorage.removeItem(pendingStorageKey);
 }
 
+function readPendingBooking() {
+  try {
+    return JSON.parse(sessionStorage.getItem(pendingBookingStorageKey) || "null");
+  } catch {
+    sessionStorage.removeItem(pendingBookingStorageKey);
+    return null;
+  }
+}
+
+function formatBusinessTime(value, timezone = "America/Vancouver") {
+  if (!value || value === "Not applicable" || value === "Not booked") return value;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) return value;
+  return `${new Intl.DateTimeFormat("en-CA", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: timezone,
+  }).format(parsed)} (${timezone})`;
+}
+
 function requestError(body, fallback) {
   return body && typeof body.message === "string" ? body.message : fallback;
 }
@@ -56,9 +91,14 @@ function renderVerifiedResult(body, payload) {
   resultIntakeState.textContent = view.intakeState;
   resultCorrelationId.textContent = view.correlationId;
   resultCrmLeadId.textContent = view.crmLeadId;
+  resultPipelineStage.textContent = view.pipelineStage;
+  resultFollowUpStatus.textContent = view.followUpStatus;
+  resultFollowUpDue.textContent = formatBusinessTime(view.followUpDueAt);
   resultAiStatus.textContent = `AI: ${view.aiStatus}`;
   resultAiStatus.className = `status-chip status-chip--${view.aiStatusTone}`;
   intakeResult.hidden = false;
+  acceptedLead = { correlationId: view.correlationId, crmLeadId: view.crmLeadId };
+  bookingPanel.hidden = false;
   return true;
 }
 
@@ -97,6 +137,13 @@ function renderTrace(trace) {
     ["Needs review", view.needsReview ? "Yes — review required" : "No"],
     ["Client received", view.clientReceivedAt],
     ["Persisted", view.persistedAt],
+    ["Follow-up status", view.followUpStatus],
+    ["Follow-up due", formatBusinessTime(view.followUpDueAt)],
+    ["Follow-up completed", formatBusinessTime(view.followUpCompletedAt)],
+    ["Booking state", view.bookingStatus],
+    ["Appointment ID", view.appointmentId],
+    ["Appointment time", formatBusinessTime(view.appointmentAt, view.appointmentTimezone)],
+    ["Confirmation sent", formatBusinessTime(view.confirmationSentAt)],
   ].forEach(([label, value]) => appendTraceField(fields, label, value));
   overview.append(heading, subtitle, fields);
 
@@ -127,6 +174,78 @@ sampleLeadButton.addEventListener("click", () => {
   status.className = "";
   status.textContent = "Sample synthetic lead loaded. You can edit any field before submitting.";
   form.elements.full_name.focus();
+});
+
+bookingForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!acceptedLead) {
+    bookingStatus.className = "error";
+    bookingStatus.textContent = "Submit and verify a lead before booking.";
+    return;
+  }
+  bookingStatus.className = "";
+  bookingStatus.textContent = "";
+  bookingSubmitButton.disabled = true;
+
+  try {
+    const configResponse = await window.LeadIntake.fetchWithTimeout(
+      "/api/config",
+      { headers: { Accept: "application/json" } },
+      5_000,
+    );
+    const config = await configResponse.json().catch(() => ({}));
+    if (
+      !configResponse.ok ||
+      typeof config.n8n_booking_webhook_url !== "string" ||
+      typeof config.business_timezone !== "string"
+    ) {
+      throw new Error("The booking workflow is not configured.");
+    }
+    const selection = window.LeadIntake.bookingPendingFor(
+      {
+        correlation_id: acceptedLead.correlationId,
+        appointment_local: bookingForm.elements.appointment_local.value,
+        business_timezone: config.business_timezone,
+      },
+      readPendingBooking(),
+      identifier,
+    );
+    sessionStorage.setItem(pendingBookingStorageKey, JSON.stringify(selection.pending));
+    if (!selection.reused) {
+      bookingStatus.textContent = "A new booking request reference was created.";
+    }
+    const response = await window.LeadIntake.fetchWithTimeout(
+      config.n8n_booking_webhook_url,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(selection.pending.payload),
+      },
+      Number.isInteger(config.n8n_request_timeout_ms) ? config.n8n_request_timeout_ms : 15_000,
+    );
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(requestError(body, "The appointment could not be booked."));
+    const view = window.LeadIntake.bookingView(body, selection.pending.payload);
+    if (!view) throw new Error("The saved appointment response could not be verified.");
+    bookingResultTitle.textContent = view.title;
+    bookingAppointmentId.textContent = view.appointmentId;
+    bookingPipelineStage.textContent = view.pipelineStage;
+    bookingFollowUpStatus.textContent = view.followUpStatus;
+    bookingConfirmationState.textContent = view.confirmationState;
+    bookingResult.hidden = false;
+    bookingStatus.className = "success";
+    bookingStatus.textContent = "The booking and confirmation response were verified.";
+    sessionStorage.removeItem(pendingBookingStorageKey);
+    traceId.value = body.correlation_id;
+  } catch (error) {
+    bookingStatus.className = "error";
+    bookingStatus.textContent =
+      error.name === "AbortError"
+        ? "The result was ambiguous. Retry unchanged to reuse the same booking request."
+        : error.message || "The appointment could not be booked.";
+  } finally {
+    bookingSubmitButton.disabled = false;
+  }
 });
 
 inspectTraceButton.addEventListener("click", () => {

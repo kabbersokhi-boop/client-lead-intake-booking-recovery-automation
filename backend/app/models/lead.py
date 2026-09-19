@@ -49,3 +49,41 @@ class AuditEvent(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JsonType, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FollowUp(Base):
+    __tablename__ = "follow_ups"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    lead_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("leads.id"), nullable=False, unique=True, index=True
+    )
+    correlation_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class Appointment(Base):
+    __tablename__ = "appointments"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    booking_request_id: Mapped[uuid.UUID] = mapped_column(unique=True, nullable=False, index=True)
+    lead_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("leads.id"), nullable=False, unique=True, index=True
+    )
+    correlation_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    appointment_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    business_timezone: Mapped[str] = mapped_column(String(80), nullable=False)
+    booking_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="booked")
+    confirmation_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

@@ -19,13 +19,25 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://lead_intake:change-me-for-local-development@postgres:5432/lead_intake}
       N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/webhook/lead-intake}
+      N8N_BOOKING_WEBHOOK_URL: ${N8N_BOOKING_WEBHOOK_URL:-http://localhost:5678/webhook/appointment-booking}
       N8N_REQUEST_TIMEOUT_MS: ${N8N_REQUEST_TIMEOUT_MS:-30000}
       CRM_ADAPTER_API_KEY: ${CRM_ADAPTER_API_KEY:-}
+      FOLLOW_UP_DELAY_SECONDS: ${FOLLOW_UP_DELAY_SECONDS:-120}
+      BUSINESS_TIMEZONE: ${BUSINESS_TIMEZONE:-America/Vancouver}
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      DEVELOPMENT_EMAIL_FROM: automation-demo@example.test
     depends_on:
       postgres:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     ports:
       - "127.0.0.1:18000:8000"
+  mailpit:
+    image: axllent/mailpit:v1.27.8
+    ports:
+      - "127.0.0.1:18025:8025"
 
 volumes:
   postgres-data:

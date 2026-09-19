@@ -1,4 +1,5 @@
 {
+  "id": "GKMASmZ5xo0UaWUY",
   "name": "Lead Intake - Validation, AI Enrichment and CRM Persistence",
   "nodes": [
     {
@@ -153,7 +154,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const expected = $('Validate AI Extraction').first().json.crmPayload;\nconst crm = $json;\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nconst valid = !crm.error && typeof crm === 'object' && uuid.test(crm.crm_lead_id || '') && crm.submission_id === expected.submission_id && crm.correlation_id === expected.correlation_id && crm.pipeline_stage === 'new_lead' && crm.ai_status === expected.ai_status && ['created', 'replayed'].includes(crm.intake_state);\nif (!valid) {\n  return [{ json: { status_code: 502, response_body: { message: 'We could not confirm that your enquiry was saved. Please retry.' } } }];\n}\nreturn [{ json: { status_code: crm.intake_state === 'created' ? 201 : 200, response_body: { state: 'accepted', intake_state: crm.intake_state, submission_id: crm.submission_id, correlation_id: crm.correlation_id, crm_lead_id: crm.crm_lead_id, ai_status: crm.ai_status } } }];"
+        "jsCode": "const expected = $('Validate AI Extraction').first().json.crmPayload;\nconst crm = $json;\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nconst followUpValid = expected.email ? crm.follow_up_status === 'pending' && typeof crm.follow_up_due_at === 'string' : crm.follow_up_status === null && crm.follow_up_due_at === null;\nconst valid = !crm.error && typeof crm === 'object' && uuid.test(crm.crm_lead_id || '') && crm.submission_id === expected.submission_id && crm.correlation_id === expected.correlation_id && crm.pipeline_stage === 'new_lead' && crm.ai_status === expected.ai_status && followUpValid && ['created', 'replayed'].includes(crm.intake_state);\nif (!valid) {\n  return [{ json: { status_code: 502, response_body: { message: 'We could not confirm that your enquiry was saved. Please retry.' } } }];\n}\nreturn [{ json: { status_code: crm.intake_state === 'created' ? 201 : 200, response_body: { state: 'accepted', intake_state: crm.intake_state, submission_id: crm.submission_id, correlation_id: crm.correlation_id, crm_lead_id: crm.crm_lead_id, ai_status: crm.ai_status, pipeline_stage: crm.pipeline_stage, follow_up_status: crm.follow_up_status, follow_up_due_at: crm.follow_up_due_at } } }];"
       },
       "id": "build-success",
       "name": "Build Intake Result",

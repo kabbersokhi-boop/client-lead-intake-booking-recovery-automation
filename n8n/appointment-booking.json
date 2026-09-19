@@ -1,0 +1,169 @@
+{
+  "id": "phase2-appointment-booking",
+  "name": "Lifecycle - Appointment Booking and Confirmation",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const booking = $json;\nif (booking?.error) {\n  const httpCode = Number(booking.error.status ?? booking.error.httpCode ?? booking.error.statusCode);\n  const controlledConflict = httpCode === 409;\n  return [{ json: { proceed: false, status_code: controlledConflict ? 409 : 502, response_body: { message: controlledConflict ? 'This lead already has a different active appointment.' : 'We could not confirm the appointment. Retry with the same booking details.' } } }];\n}\nreturn [{ json: { ...booking, proceed: true } }];"
+      },
+      "id": "route-appointment-result",
+      "name": "Route Appointment Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "leftValue": "={{ $json.proceed }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "appointment-created",
+      "name": "Appointment Created?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1200, 220]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "appointment-booking",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "receive-booking",
+      "webhookId": "58166a34-e7f1-48a5-8301-63f185777012",
+      "name": "Receive Booking Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawRequest = $json.body ?? $json;\nlet request = rawRequest;\nconst errors = [];\nif (typeof rawRequest === 'string') { try { request = JSON.parse(rawRequest); } catch { errors.push('Expected a JSON object.'); } }\nif (!request || typeof request !== 'object' || Array.isArray(request)) errors.push('Expected a JSON object.');\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nif (typeof request?.booking_request_id !== 'string' || !uuid.test(request.booking_request_id)) errors.push('Booking request identifier is invalid.');\nif (typeof request?.correlation_id !== 'string' || !uuid.test(request.correlation_id)) errors.push('Correlation identifier is invalid.');\nif (typeof request?.appointment_local !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$/.test(request.appointment_local)) errors.push('Choose a valid business-local appointment time.');\nif (request?.business_timezone !== 'America/Vancouver') errors.push('Business timezone must be America/Vancouver.');\nreturn [{ json: { input_valid: errors.length === 0, errors, request } }];"
+      },
+      "id": "validate-booking",
+      "name": "Validate Booking Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "leftValue": "={{ $json.input_valid }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "booking-valid",
+      "name": "Booking Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_ADAPTER_URL + '/api/crm/bookings' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "X-CRM-Adapter-Key", "value": "={{ $env.CRM_ADAPTER_API_KEY }}" }] },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.request }}",
+        "options": { "timeout": "={{ Number($env.CRM_ADAPTER_TIMEOUT_MS || 6000) }}" }
+      },
+      "id": "create-appointment",
+      "name": "Create Appointment and Transition Lifecycle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 220],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_ADAPTER_URL + '/api/crm/appointments/' + $json.appointment_id + '/confirmation' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "X-CRM-Adapter-Key", "value": "={{ $env.CRM_ADAPTER_API_KEY }}" }] },
+        "options": { "timeout": "={{ Number($env.CRM_ADAPTER_TIMEOUT_MS || 6000) }}" }
+      },
+      "id": "send-confirmation",
+      "name": "Send Booking Confirmation Test Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 160],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const booking = $('Create Appointment and Transition Lifecycle').first().json;\nconst confirmation = $json;\nconst expected = $('Validate Booking Request').first().json.request;\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nconst confirmationValid = ['sent','already_sent','skipped_no_email'].includes(confirmation?.state);\nconst bookingValid = !booking?.error && uuid.test(booking?.appointment_id || '') && booking.booking_request_id === expected.booking_request_id && booking.correlation_id === expected.correlation_id && booking.pipeline_stage === 'appointment_booked' && booking.appointment_status === 'booked' && ['created','replayed'].includes(booking.booking_state);\nif (!bookingValid || !confirmationValid) {\n  const httpCode = Number(booking?.error?.httpCode ?? booking?.error?.statusCode);\n  const controlledConflict = httpCode === 409;\n  return [{ json: { status_code: controlledConflict ? 409 : 502, response_body: { message: controlledConflict ? 'This lead already has a different active appointment.' : 'We could not confirm the appointment. Retry with the same booking details.' } } }];\n}\nreturn [{ json: { status_code: booking.booking_state === 'created' ? 201 : 200, response_body: { state: 'booked', booking_state: booking.booking_state, booking_request_id: booking.booking_request_id, correlation_id: booking.correlation_id, appointment_id: booking.appointment_id, appointment_at: booking.appointment_at, business_timezone: booking.business_timezone, pipeline_stage: booking.pipeline_stage, follow_up_status: booking.follow_up_status, confirmation_state: confirmation.state } } }];"
+      },
+      "id": "build-booking-result",
+      "name": "Build Booking Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 160]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response_body }}",
+        "options": {
+          "responseCode": "={{ $json.status_code }}",
+          "responseHeaders": { "entries": [{ "name": "Access-Control-Allow-Origin", "value": "http://localhost:18000" }, { "name": "Vary", "value": "Origin" }] }
+        }
+      },
+      "id": "respond-booking",
+      "name": "Return Booking Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1920, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status_code: 422, response_body: { message: 'Please correct the appointment details.', errors: $json.errors } } }];"
+      },
+      "id": "invalid-booking-response",
+      "name": "Build Booking Validation Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 410]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response_body }}",
+        "options": {
+          "responseCode": "={{ $json.status_code }}",
+          "responseHeaders": { "entries": [{ "name": "Access-Control-Allow-Origin", "value": "http://localhost:18000" }, { "name": "Vary", "value": "Origin" }] }
+        }
+      },
+      "id": "respond-invalid-booking",
+      "name": "Return Booking Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [960, 410]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Receive Booking Request": { "main": [[{ "node": "Validate Booking Request", "type": "main", "index": 0 }]] },
+    "Validate Booking Request": { "main": [[{ "node": "Booking Valid?", "type": "main", "index": 0 }]] },
+    "Booking Valid?": { "main": [[{ "node": "Create Appointment and Transition Lifecycle", "type": "main", "index": 0 }], [{ "node": "Build Booking Validation Response", "type": "main", "index": 0 }]] },
+    "Create Appointment and Transition Lifecycle": { "main": [[{ "node": "Route Appointment Result", "type": "main", "index": 0 }]] },
+    "Route Appointment Result": { "main": [[{ "node": "Appointment Created?", "type": "main", "index": 0 }]] },
+    "Appointment Created?": { "main": [[{ "node": "Send Booking Confirmation Test Email", "type": "main", "index": 0 }], [{ "node": "Return Booking Result", "type": "main", "index": 0 }]] },
+    "Send Booking Confirmation Test Email": { "main": [[{ "node": "Build Booking Result", "type": "main", "index": 0 }]] },
+    "Build Booking Result": { "main": [[{ "node": "Return Booking Result", "type": "main", "index": 0 }]] },
+    "Build Booking Validation Response": { "main": [[{ "node": "Return Booking Validation Error", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

@@ -21,7 +21,9 @@ app.include_router(router)
 def frontend_config() -> dict[str, str | int]:
     return {
         "n8n_webhook_url": settings.n8n_webhook_url,
+        "n8n_booking_webhook_url": settings.n8n_booking_webhook_url,
         "n8n_request_timeout_ms": settings.n8n_request_timeout_ms,
+        "business_timezone": settings.business_timezone,
     }
 
 

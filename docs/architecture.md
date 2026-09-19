@@ -1,14 +1,15 @@
-# Phase 1 architecture
+# Phase 1–2 architecture
 
 ## Responsibilities
 
 | Component | Responsibility |
 | --- | --- |
-| Browser form | Captures a manual synthetic enquiry, creates UUID trace identifiers, and retains one pending identity for an unchanged retry after an ambiguous outcome. |
-| n8n | Owns intake orchestration: business validation, normalization, NVIDIA request, strict output validation, safe fallback, CRM call, and webhook response. |
+| Browser form | Captures a manual synthetic enquiry and optional business-local appointment, creates UUID request identities, and retains an unchanged pending identity after an ambiguous outcome. |
+| n8n | Owns intake, scheduled follow-up, and booking orchestration while calling narrow development CRM/domain boundaries. |
 | NVIDIA NIM | Performs bounded extraction from the original message only. |
-| Development CRM adapter | Validates the n8n contract and persists the lead through a provider interface. It is not GoHighLevel. |
-| PostgreSQL | Stores source and server timestamps, lead data, and auditable safe provider metadata by correlation ID. |
+| Development CRM adapter | Validates n8n contracts, persists leads, applies transactional booking state, and sends development email to Mailpit. It is not GoHighLevel. |
+| PostgreSQL | Stores lead, follow-up, appointment, source/server timestamp, idempotency, and audit state by correlation ID. |
+| Mailpit | Accepts local development SMTP messages and exposes them on a loopback web UI. It is not an external email provider. |
 
 ## Demonstration lead source
 
@@ -19,12 +20,18 @@ home-services website or a production client deployment.
 In a real automation environment, source-specific adapters could map website
 forms, CRM-native forms, advertising lead forms, messaging channels, or other
 webhook/API sources into the same normalized internal lead contract before
-downstream orchestration. Those sources are not implemented or tested in Phase
-1.
+downstream orchestration. Those sources are not implemented or tested in the
+current phase.
 
 ## Verification trace
 
-After a successful submission, the browser displays the returned correlation ID and pre-fills the read-only trace lookup panel. `GET /api/traces/{correlation_id}` joins the persisted lead with its safe audit events so an interviewer can inspect what happened to one specific synthetic lead. This query does not mutate data and is intentionally separate from the intake workflow.
+After a successful submission, the browser displays the returned correlation ID, enables booking without copying internal IDs, and pre-fills the read-only trace lookup panel. `GET /api/traces/{correlation_id}` joins the persisted lead, follow-up, appointment, and safe audit events. This local-development query does not mutate data.
+
+## Lifecycle consistency
+
+Lead creation and initial follow-up scheduling share one transaction. Booking creation, the `appointment_booked` transition, pending-follow-up cancellation, and their audit events share a second transaction. n8n still visibly owns the workflow before and after these operations. SMTP delivery is guarded by durable sent/cancelled state and PostgreSQL row locks for normal replay behavior; Phase 3 recovery queues are deliberately absent.
+
+Appointment input is an offset-free Surrey business-local value with the explicit configured zone `America/Vancouver`. The backend converts it to a canonical timezone-aware instant for storage and rejects unsupported zones or nonexistent local wall times.
 
 ## Failure behavior
 
@@ -36,6 +43,6 @@ The CRM adapter validates all inbound data again. Its persistence operation uses
 
 The client `received_at` is stored as source data. `created_at` is assigned by the persistence layer and recorded in the creation audit as the trusted server timestamp; the browser clock is not treated as authoritative.
 
-## Extension point
+## Development boundary
 
-The orchestration contract is the `POST /api/crm/leads` payload. `DevelopmentCRMProvider` is the working provider in Phase 1. A future `GoHighLevelCRMProvider` can implement the same interface and map the stable payload to a GoHighLevel sandbox without changing n8n node logic.
+The working integration remains `DevelopmentCRMProvider` plus the small lifecycle service. No GoHighLevel, real calendar, external email provider, or failure-recovery subsystem is configured.

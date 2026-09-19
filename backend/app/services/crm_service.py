@@ -3,12 +3,14 @@
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import AuditEvent, Lead
+from app.config import settings
+from app.models import AuditEvent, FollowUp, Lead
 from app.schemas.lead import CRMLeadCreate
 
 
@@ -19,6 +21,7 @@ class SubmissionConflictError(Exception):
 @dataclass(frozen=True)
 class CreateLeadResult:
     lead: Lead
+    follow_up: FollowUp | None
     created: bool
 
 
@@ -42,7 +45,7 @@ class DevelopmentCRMService:
         fingerprint = submission_fingerprint(payload)
         existing = db.scalar(select(Lead).where(Lead.submission_id == payload.submission_id))
         if existing:
-            return self._existing_result(existing, fingerprint)
+            return self._existing_result(existing, fingerprint, db)
 
         enrichment = payload.enrichment
         lead = Lead(
@@ -72,6 +75,17 @@ class DevelopmentCRMService:
         try:
             db.flush()
             db.refresh(lead)
+            follow_up = None
+            if lead.email:
+                follow_up = FollowUp(
+                    lead_id=lead.id,
+                    correlation_id=lead.correlation_id,
+                    due_at=datetime.now(timezone.utc)
+                    + timedelta(seconds=settings.follow_up_delay_seconds),
+                )
+                db.add(follow_up)
+                db.flush()
+                db.refresh(follow_up)
             db.add(
                 AuditEvent(
                     correlation_id=payload.correlation_id,
@@ -93,19 +107,40 @@ class DevelopmentCRMService:
                     },
                 )
             )
+            if follow_up:
+                db.add(
+                    AuditEvent(
+                        correlation_id=lead.correlation_id,
+                        lead_id=lead.id,
+                        event_type="follow_up.scheduled",
+                        status="success",
+                        metadata_json={
+                            "follow_up_id": str(follow_up.id),
+                            "due_at": follow_up.due_at.isoformat(),
+                            "delay_seconds": settings.follow_up_delay_seconds,
+                        },
+                    )
+                )
             db.commit()
         except IntegrityError:
             db.rollback()
             existing = db.scalar(select(Lead).where(Lead.submission_id == payload.submission_id))
             if existing:
-                return self._existing_result(existing, fingerprint)
+                return self._existing_result(existing, fingerprint, db)
             raise
 
         db.refresh(lead)
-        return CreateLeadResult(lead=lead, created=True)
+        if follow_up:
+            db.refresh(follow_up)
+        return CreateLeadResult(lead=lead, follow_up=follow_up, created=True)
 
     @staticmethod
-    def _existing_result(existing: Lead, fingerprint: str) -> CreateLeadResult:
+    def _existing_result(
+        existing: Lead, fingerprint: str, db: Session | None = None
+    ) -> CreateLeadResult:
         if existing.submission_fingerprint != fingerprint:
             raise SubmissionConflictError
-        return CreateLeadResult(lead=existing, created=False)
+        follow_up = (
+            db.scalar(select(FollowUp).where(FollowUp.lead_id == existing.id)) if db else None
+        )
+        return CreateLeadResult(lead=existing, follow_up=follow_up, created=False)

@@ -5,6 +5,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
+from app.schemas.lifecycle import AppointmentResponse, FollowUpResponse
+
 PHONE_RE = re.compile(r"^[0-9+().\-\s]{7,50}$")
 
 
@@ -164,6 +166,8 @@ class CRMCreateResponse(BaseModel):
     pipeline_stage: str
     ai_status: str
     intake_state: str
+    follow_up_status: str | None
+    follow_up_due_at: datetime | None
 
 
 class AuditEventResponse(BaseModel):
@@ -181,4 +185,6 @@ class AuditEventResponse(BaseModel):
 class TraceResponse(BaseModel):
     correlation_id: uuid.UUID
     lead: LeadResponse | None
+    follow_ups: list[FollowUpResponse]
+    appointments: list[AppointmentResponse]
     audit_events: list[AuditEventResponse]

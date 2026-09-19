@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.api.routes import get_lead, get_trace, list_audit_events, list_leads
-from app.models import AuditEvent, Lead
+from app.models import AuditEvent, FollowUp, Lead
 from app.providers.crm import DevelopmentCRMProvider
 from app.schemas.lead import CRMLeadCreate
 from app.services.crm_service import SubmissionConflictError
@@ -119,7 +119,8 @@ def test_crm_persists_enriched_lead_audit_event_and_trace_timestamps(db):
     trace = get_trace(correlation_id=uuid.UUID(request["correlation_id"]), db=db)
     assert trace.lead is not None
     assert trace.lead.id == lead.id
-    assert len(trace.audit_events) == 1
+    assert trace.follow_ups[0].status == "pending"
+    assert len(trace.audit_events) == 2
 
 
 @pytest.mark.parametrize("ai_status", ["fallback_invalid", "fallback_unavailable"])
@@ -159,7 +160,8 @@ def test_submission_id_is_idempotent_for_same_customer_input(db):
     assert second.created is False
     assert first.lead.id == second.lead.id
     assert len(list(db.scalars(select(Lead)))) == 1
-    assert len(list(db.scalars(select(AuditEvent)))) == 1
+    assert len(list(db.scalars(select(FollowUp)))) == 1
+    assert len(list(db.scalars(select(AuditEvent)))) == 2
 
 
 def test_same_submission_id_with_different_customer_input_is_conflict(db):
@@ -178,4 +180,15 @@ def test_same_submission_id_with_different_customer_input_is_conflict(db):
     with pytest.raises(SubmissionConflictError):
         provider.create_lead(db, changed)
     assert len(list(db.scalars(select(Lead)))) == 1
-    assert len(list(db.scalars(select(AuditEvent)))) == 1
+    assert len(list(db.scalars(select(AuditEvent)))) == 2
+
+
+def test_phone_only_lead_does_not_schedule_email_follow_up(db):
+    request = CRMLeadCreate.model_validate(payload(email=None))
+    result = DevelopmentCRMProvider().create_lead(db, request)
+
+    assert result.follow_up is None
+    assert list(db.scalars(select(FollowUp))) == []
+    assert [event.event_type for event in list(db.scalars(select(AuditEvent)))] == [
+        "crm.lead_created"
+    ]

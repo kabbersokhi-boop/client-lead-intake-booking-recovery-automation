@@ -1,7 +1,15 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { pendingFor, successView, traceView, verifiedSuccess } = require("../intake.js");
+const {
+  bookingPendingFor,
+  bookingView,
+  pendingFor,
+  successView,
+  traceView,
+  verifiedBooking,
+  verifiedSuccess,
+} = require("../intake.js");
 
 const values = {
   full_name: "Maya Verma",
@@ -47,6 +55,9 @@ test("only the documented intake contract confirms browser success", () => {
     intake_state: "created",
     crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",
     ai_status: "enriched",
+    pipeline_stage: "new_lead",
+    follow_up_status: "pending",
+    follow_up_due_at: "2026-09-19T00:02:00Z",
     ...payload,
   };
   assert.equal(verifiedSuccess(valid, payload), true);
@@ -57,6 +68,9 @@ test("only the documented intake contract confirms browser success", () => {
     crmLeadId: valid.crm_lead_id,
     aiStatus: "enriched",
     aiStatusTone: "success",
+    pipelineStage: "new_lead",
+    followUpStatus: "pending",
+    followUpDueAt: "2026-09-19T00:02:00Z",
   });
   assert.equal(verifiedSuccess({}, payload), false);
   assert.equal(successView({}, payload), null);
@@ -74,6 +88,9 @@ test("fallback AI outcomes keep verified intake success but use warning presenta
       intake_state: "created",
       crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",
       ai_status: "fallback_unavailable",
+      pipeline_stage: "new_lead",
+      follow_up_status: "pending",
+      follow_up_due_at: "2026-09-19T00:02:00Z",
       ...payload,
     },
     payload,
@@ -99,13 +116,59 @@ test("trace view prioritizes useful persisted lead fields", () => {
       created_at: "2026-09-19T00:00:01Z",
     },
     audit_events: [{ event_type: "crm.lead_created", status: "success" }],
+    follow_ups: [{ status: "pending", due_at: "2026-09-19T00:02:00Z" }],
+    appointments: [],
   });
 
   assert.equal(view.customer, "Maya Verma");
   assert.equal(view.serviceType, "furnace_service");
   assert.equal(view.needsReview, false);
   assert.equal(view.audits.length, 1);
+  assert.equal(view.followUpStatus, "pending");
+  assert.equal(view.bookingStatus, "not booked");
   assert.equal(traceView({ lead: null }), null);
+});
+
+test("unchanged booking retry reuses its booking request identifier", () => {
+  const values = {
+    correlation_id: "eeb1b11a-22c8-4a2f-a463-554246c14a16",
+    appointment_local: "2026-10-20T10:30",
+    business_timezone: "America/Vancouver",
+  };
+  const first = bookingPendingFor(values, null, () => "booking-one").pending;
+  const replay = bookingPendingFor({ ...values }, first, () => "booking-two");
+  const changed = bookingPendingFor(
+    { ...values, appointment_local: "2026-10-20T11:30" },
+    first,
+    () => "booking-two",
+  );
+
+  assert.equal(replay.reused, true);
+  assert.equal(replay.pending.payload.booking_request_id, "booking-one");
+  assert.equal(changed.reused, false);
+  assert.equal(changed.pending.payload.booking_request_id, "booking-two");
+});
+
+test("booking success requires the verified lifecycle response", () => {
+  const payload = {
+    booking_request_id: "09f70a8e-1304-42b9-a1e6-022d2daf4bd6",
+    correlation_id: "eeb1b11a-22c8-4a2f-a463-554246c14a16",
+  };
+  const body = {
+    state: "booked",
+    booking_state: "created",
+    appointment_id: "d678189e-db40-46d7-89a5-4bca74dded23",
+    appointment_at: "2026-10-20T17:30:00Z",
+    business_timezone: "America/Vancouver",
+    pipeline_stage: "appointment_booked",
+    follow_up_status: "cancelled",
+    confirmation_state: "sent",
+    ...payload,
+  };
+
+  assert.equal(verifiedBooking(body, payload), true);
+  assert.equal(bookingView(body, payload).followUpStatus, "cancelled");
+  assert.equal(verifiedBooking({ ...body, pipeline_stage: "new_lead" }, payload), false);
 });
 
 test("trace view clearly marks fallback records needing review", () => {

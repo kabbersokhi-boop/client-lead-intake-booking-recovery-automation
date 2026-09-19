@@ -34,3 +34,29 @@ def test_crm_contract_replay_and_conflict_responses(client):
     conflict = client.post("/api/crm/leads", json=changed)
     assert conflict.status_code == 409
     assert "different lead data" in conflict.json()["detail"]
+
+
+def test_lifecycle_write_endpoints_require_adapter_auth(client):
+    identifier = "00000000-0000-4000-8000-000000000000"
+    for method, path, request_body in [
+        ("get", "/api/crm/follow-ups/due", None),
+        ("post", f"/api/crm/follow-ups/{identifier}/dispatch", None),
+        (
+            "post",
+            "/api/crm/bookings",
+            {
+                "booking_request_id": identifier,
+                "correlation_id": identifier,
+                "appointment_local": "2099-01-01T10:00",
+                "business_timezone": "America/Vancouver",
+            },
+        ),
+        ("post", f"/api/crm/appointments/{identifier}/confirmation", None),
+    ]:
+        response = client.request(
+            method.upper(),
+            path,
+            headers={"X-CRM-Adapter-Key": "wrong-key"},
+            json=request_body,
+        )
+        assert response.status_code == 401

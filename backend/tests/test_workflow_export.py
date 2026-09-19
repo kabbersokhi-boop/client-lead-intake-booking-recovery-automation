@@ -35,3 +35,31 @@ def test_sanitized_workflow_has_required_safety_controls():
     headers = success_options["responseHeaders"]["entries"]
     response_headers = {header["name"]: header["value"] for header in headers}
     assert response_headers["Access-Control-Allow-Origin"] == "http://localhost:18000"
+
+
+def test_phase_two_workflows_are_sanitized_and_use_semantic_boundaries():
+    export_dir = Path(__file__).resolve().parents[2] / "n8n"
+    booking = json.loads((export_dir / "appointment-booking.json").read_text())
+    follow_up = json.loads((export_dir / "follow-up-dispatch.json").read_text())
+
+    for workflow in [booking, follow_up]:
+        serialized = json.dumps(workflow).lower()
+        assert "nvapi-" not in serialized
+        assert "x-n8n-api-key" not in serialized
+        assert all("credentials" not in node for node in workflow["nodes"])
+
+    booking_nodes = {node["name"]: node for node in booking["nodes"]}
+    assert booking["name"] == "Lifecycle - Appointment Booking and Confirmation"
+    assert "Validate Booking Request" in booking_nodes
+    assert "Create Appointment and Transition Lifecycle" in booking_nodes
+    assert "Send Booking Confirmation Test Email" in booking_nodes
+    assert "America/Vancouver" in booking_nodes["Validate Booking Request"]["parameters"][
+        "jsCode"
+    ]
+
+    follow_up_nodes = {node["name"]: node for node in follow_up["nodes"]}
+    assert follow_up["name"] == "Lifecycle - Dispatch Due Follow-ups"
+    assert follow_up_nodes["Check Every Minute"]["type"] == "n8n-nodes-base.scheduleTrigger"
+    assert "follow-ups/due" in follow_up_nodes["Fetch Due Pending Follow-ups"]["parameters"][
+        "url"
+    ]
