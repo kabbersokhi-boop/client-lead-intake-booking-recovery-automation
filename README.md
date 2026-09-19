@@ -74,6 +74,8 @@ Tests use SQLite and mocked/persisted fallback inputs only; they never call NVID
 
 Use the checklist in [docs/phase-1-verification.md](docs/phase-1-verification.md). A live NVIDIA NIM call and a live n8n execution must be recorded there only after they actually succeed. This repository does not claim that they have run merely because the workflow definition exists.
 
+The local verification performed for this demonstration includes a real n8n webhook execution that reached the NVIDIA endpoint, took the safe `fallback_unavailable` branch when the account could not invoke an enabled model, persisted the lead, created an audit event, and returned HTTP 201. A successful live NVIDIA enrichment is **not** claimed: the supplied account can authenticate and list models, but its tested inference functions are retired or not provisioned.
+
 ## Security
 
 - `.env` is ignored and `.env.example` contains placeholders only.
