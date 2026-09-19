@@ -8,24 +8,26 @@ checks that remain blocked; it does not treat a workflow export as execution evi
 | Check | Result | Evidence |
 | --- | --- | --- |
 | Backend migration and health | Passed | Compose applied `20260919_02`; `GET /health` returned `200`. |
-| Backend lint and HTTP contract tests | Passed | `ruff check app tests`; 22 SQLite-backed tests passed. |
+| Backend lint and HTTP contract tests | Passed | `ruff check app tests`; 23 tests passed, including PostgreSQL migration and concurrent replay coverage. |
 | PostgreSQL migration and concurrency test | Passed | 23 tests passed with a disposable PostgreSQL 16 container. |
-| Browser retry and workflow code fixtures | Passed | 3 browser-helper and 6 exported-workflow JavaScript tests passed under Node 22. |
+| Browser retry, verified-result, trace-view, and workflow code fixtures | Passed | 4 browser-helper and 6 exported-workflow JavaScript tests passed under Node 22. |
 | Deployed workflow/export comparison | Passed | Workflow `GKMASmZ5xo0UaWUY` was updated locally; its validation, normalization, AI parsing, CRM request, and result-building logic matched `n8n/lead-intake.json` after export. |
 | Real n8n webhook through CRM persistence | Passed with NVIDIA fallback | Execution `143` returned HTTP `201`; correlation `134d9b3a-2454-4769-bf25-fd62c536c743`; CRM lead `aacb40ff-ae90-43c4-a0e2-1d6dd6fe54d5`; `ai_status=fallback_unavailable`; one `crm.lead_created` audit event. |
+| Direct NVIDIA chat-completions request | Passed | One synthetic request using `openai/gpt-oss-20b` returned HTTP `200` and a non-empty chat response. The request used only `model`, `temperature`, and `messages`. |
+| Real enriched n8n path | Passed | Execution `145` returned HTTP `201`; correlation `76f64b8c-05a6-4df3-bfac-bda5e8707745`; CRM lead `92ee5412-be41-4b2a-abbe-98fca7388407`; `ai_status=enriched`; schema-valid service context; one `crm.lead_created` audit event. |
 
-The execution's persisted provider metadata was `provider=nvidia_nim`,
-`outcome_class=provider_error`, `error_code=ERR_BAD_REQUEST`, and execution
-reference `143`. It did **not** prove NVIDIA inference authorization: the
-rotated credential has not yet been supplied and the selected model was unset.
+The enriched execution persisted `provider=nvidia_nim`,
+`model_id=openai/gpt-oss-20b`, `outcome_class=enriched`, `status_code=200`, and
+execution reference `145`. Its persisted fields were `furnace_service`,
+`Surrey`, `Tuesday afternoon`, and `medium`; its summary was present and within
+the application schema bound. The earlier fallback execution remains retained
+as evidence that AI is not a single point of failure.
 
 ## Not executed / blocked
 
 | Check | Status | Required next action |
 | --- | --- | --- |
-| Browser GUI submission | Not executed | This environment has no installed browser automation binary. Open `http://localhost:18000`, submit the synthetic Maya Verma enquiry, and confirm the returned correlation ID in n8n and `/api/traces/<id>`. |
-| Direct NVIDIA chat-completions verification after rotation | Blocked | Revoke the exposed NVIDIA key, place a replacement only in the secure local n8n/runtime secret channel, select one currently enabled model, then run one minimal synthetic direct request before updating the workflow environment. See `docs/provider-diagnostics.md`. |
-| Live enriched end-to-end path | Blocked by the same credential/model authorization action | Re-run the browser flow after the direct request succeeds; the persisted lead must have `ai_status=enriched` and schema-valid enrichment. |
+| Browser GUI submission | Not executed | This environment has no installed browser automation binary. The webhook response contract was verified by the live synthetic POST above and by browser-helper tests. Open `http://localhost:18000`, submit the synthetic Maya Verma enquiry, and inspect the returned trace for a manual visual check. |
 
 ## Repeatable commands
 

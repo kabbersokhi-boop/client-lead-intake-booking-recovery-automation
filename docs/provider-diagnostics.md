@@ -10,8 +10,8 @@ in a local Docker container environment during prior setup. It was also present
 in command/tool context while that local container was created. It was **not**
 found in tracked repository files or reachable Git history during the
 2026-09-19 redacted scans. There is no evidence from those scans that it was
-published to GitHub. The replacement n8n container has no `NVIDIA_*`
-environment variables.
+published to GitHub. The recreated n8n container reads its replacement runtime
+configuration from protected local storage; values are not retained here.
 
 Deletion from a container is not remediation. The supplied key must be revoked
 or rotated in NVIDIA's key-management interface before any further inference
@@ -19,7 +19,24 @@ attempt. A replacement must be placed only in local protected secret storage or
 n8n credential/runtime configuration, never in chat, Git, a screenshot, a
 frontend response, or an exported workflow.
 
-## Current corrected-workflow observation
+## Live verification after credential rotation
+
+| Field | Direct request | n8n workflow request |
+| --- | --- | --- |
+| Timestamp | 2026-09-19; exact request timestamp not retained | 2026-09-19T18:22:33Z |
+| Caller | Direct synthetic check | n8n execution `145` |
+| Endpoint | NVIDIA OpenAI-compatible `/v1/chat/completions` | NVIDIA OpenAI-compatible `/v1/chat/completions` |
+| Model ID | `openai/gpt-oss-20b` | `openai/gpt-oss-20b` |
+| HTTP status | `200` | `200` persisted in safe provider metadata |
+| Request / response reference | `chatcmpl-9228e2f658a7f0d8` | n8n execution `145` |
+| Parameters | `model`, `temperature`, and `messages` | `model`, `temperature`, and `messages` |
+| Result | Non-empty chat response | Schema-valid enriched service context persisted through the development CRM adapter |
+
+The direct request used synthetic text only. Neither request stored or exposed
+an authorization header, token, or API key in repository files, workflow
+exports, documentation, or browser content.
+
+## Historical fallback observation
 
 | Field | Value |
 | --- | --- |
@@ -43,16 +60,9 @@ or unavailable functions from an authorization decision; they do not establish
 that the account lacks chat-inference entitlement. No further model probing was
 performed for this correction.
 
-## Required human action
+## Ongoing key handling
 
-1. Revoke the exposed NVIDIA API key in NVIDIA's API-key management interface.
-2. Put a replacement in the existing local protected secret channel or n8n
-   credential/runtime configuration, not in this repository or chat.
-3. Select one currently available model from NVIDIA's current documentation.
-4. Notify the operator that the protected runtime secret and model ID are set.
-
-Verification succeeds only when one minimal, direct, synthetic
-chat-completions request outside n8n returns a valid response using NVIDIA's
-current official OpenAI-compatible example and supported parameters. The same
-model and compatible request shape can then be configured in the workflow and
-the browser-to-n8n-to-CRM flow rerun.
+The replacement key remains only in protected local runtime storage. Keep it
+out of chat, Git, screenshots, browser responses, n8n workflow exports, and
+command output. Rotation/revocation remains the required remediation for the
+previously exposed key.
