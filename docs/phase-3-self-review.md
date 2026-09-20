@@ -51,6 +51,7 @@ The CLI now validates expected manifest identities, exact matching leads, zero m
 3. **Overlapping active fault runs were ambiguous.** Two operator-created runs could target the same submission. Activation now rejects overlap atomically.
 4. **Successful attempt status lost 201 semantics.** The workflow now records 201 for created and 200 for replayed results.
 5. **Repeated TestClient lifespan cycles could hang under Python 3.14.** Related authenticated fault assertions share one client-scoped test, and MIME parsing runs in an isolated subprocess. This preserves coverage without accepting a flaky rerun.
+6. **The final runtime export had normalized defaults and layout not present in the committed JSON.** The live n8n nodes, connections, and settings were preserved in the sanitized export, including `binaryMode`, while runtime ownership/project metadata was deliberately excluded. Exact parity and the workflow suite were rerun after this correction.
 
 No additional defect was found in the reviewed booking lock order, finite retry budget, HTTP-date parsing, committed-write reconciliation, manual one-shot requeue, queued browser truthfulness, lifecycle preservation, operator authentication, or SMTP separation. Their regression tests and the live evidence below support that conclusion within this project scope.
 
