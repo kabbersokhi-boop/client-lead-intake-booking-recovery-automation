@@ -10,6 +10,9 @@
   const $ = (id) => document.getElementById(id);
   let jobsPage = 1;
   let incidentsPage = 1;
+  let appliedJobQuery = { state: "", lookupKind: "job_id", lookupId: "" };
+  let appliedIncidentState = "all";
+  let jobQueryGeneration = 0;
   let selectedJob = null;
   let detailVersion = 0;
   let jobsController;
@@ -71,13 +74,23 @@
   }
 
   function validatePage(data, expectedPage) {
-    if (!isObject(data) || !isTimestamp(data.observed_at) || !isCount(data.total) || data.page !== expectedPage || data.page_size !== 25 || !Array.isArray(data.items)) throw invalidResponse();
+    if (!isObject(data) || !isTimestamp(data.observed_at) || !isCount(data.total) || data.page !== expectedPage || data.page_size !== 25 || !Array.isArray(data.items) || data.items.length > data.page_size) throw invalidResponse();
     return data;
   }
 
-  function validateJobs(data, expectedPage) {
+  function matchesJobQuery(job, query) {
+    if (query.state && job.state !== query.state) return false;
+    if (!query.lookupId) return true;
+    const field = { job_id: "id", submission_id: "submission_id", correlation_id: "correlation_id" }[query.lookupKind];
+    return field !== undefined && job[field].toLowerCase() === query.lookupId.toLowerCase();
+  }
+
+  function validateJobs(data, expectedPage, query) {
     validatePage(data, expectedPage);
-    data.items.forEach(validateJobListItem);
+    data.items.forEach((job) => {
+      validateJobListItem(job);
+      if (!matchesJobQuery(job, query)) throw invalidResponse();
+    });
     return data;
   }
 
@@ -86,9 +99,12 @@
     return entry;
   }
 
-  function validateIncidents(data, expectedPage) {
+  function validateIncidents(data, expectedPage, state) {
     validatePage(data, expectedPage);
-    data.items.forEach(validateIncident);
+    data.items.forEach((entry) => {
+      validateIncident(entry);
+      if (state !== "all" && entry.state !== state) throw invalidResponse();
+    });
     return data;
   }
 
@@ -218,14 +234,20 @@
     }
   }
 
-  function jobsUrl(page) {
+  function draftJobQuery() {
+    return {
+      state: $("job-state").value,
+      lookupKind: $("lookup-kind").value,
+      lookupId: $("lookup-id").value.trim(),
+    };
+  }
+
+  function jobsUrl(page, query) {
     const params = new URLSearchParams({ page: String(page), page_size: "25" });
-    const state = $("job-state").value;
-    const lookup = $("lookup-id").value.trim();
-    if (state) params.set("state", state);
-    if (lookup) {
-      params.set("lookup_kind", $("lookup-kind").value);
-      params.set("lookup_id", lookup);
+    if (query.state) params.set("state", query.state);
+    if (query.lookupId) {
+      params.set("lookup_kind", query.lookupKind);
+      params.set("lookup_id", query.lookupId);
     }
     return `/api/operations/jobs?${params}`;
   }
@@ -238,14 +260,14 @@
     return cell;
   }
 
-  function renderJobs(data) {
+  function renderJobs(data, query, generation) {
     const body = $("jobs-body");
     body.replaceChildren();
     if (!data.items.length) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
       cell.colSpan = 6;
-      cell.textContent = $("lookup-id").value.trim() ? "No job matches this valid identifier." : "No recorded jobs match these filters.";
+      cell.textContent = query.lookupId ? "No job matches this valid identifier." : "No recorded jobs match these filters.";
       row.append(cell);
       body.append(row);
     }
@@ -257,7 +279,7 @@
       select.type = "button";
       select.className = "job-select";
       select.textContent = job.id;
-      select.addEventListener("click", () => detail(job.id));
+      select.addEventListener("click", () => detail(job.id, generation));
       ref.className = "identifier";
       ref.append(select, document.createElement("br"), document.createTextNode(`submission: ${job.submission_id}`), document.createElement("br"), document.createTextNode(`correlation: ${job.correlation_id}`));
       row.append(ref);
@@ -280,6 +302,19 @@
     $("jobs-next").disabled = true;
   }
 
+  function clearJobRows() {
+    $("jobs-body").replaceChildren();
+    $("jobs-page").textContent = "";
+    disableJobsPager();
+  }
+
+  function clearIncidentRows() {
+    $("incidents-list").replaceChildren();
+    $("incidents-page").textContent = "";
+    $("incidents-previous").disabled = true;
+    $("incidents-next").disabled = true;
+  }
+
   function clearDetail(message = "No job selected.") {
     selectedJob = null;
     detailVersion += 1;
@@ -290,23 +325,24 @@
     root.textContent = message;
   }
 
-  async function jobs({ contextChanged = false } = {}) {
-    if (contextChanged) clearDetail("Filter context changed. Select a matching job to inspect it.");
+  async function jobs() {
     abort(jobsController, superseded);
     const controller = jobsController = new AbortController();
     const requestedPage = jobsPage;
+    const query = appliedJobQuery;
+    const generation = jobQueryGeneration;
     $("jobs-status").className = "operations-status";
     $("jobs-status").textContent = `Loading filtered jobs…${staleSuffix(jobsObservedAt, "Results above")}`;
     disableJobsPager();
     try {
-      const data = validateJobs(await read(jobsUrl(requestedPage), controller), requestedPage);
-      if (jobsController !== controller) return;
-      if (data.total > 0 && data.items.length === 0 && requestedPage > Math.ceil(data.total / data.page_size)) {
+      const data = validateJobs(await read(jobsUrl(requestedPage, query), controller), requestedPage, query);
+      if (jobsController !== controller || generation !== jobQueryGeneration) return;
+      if (data.items.length === 0 && requestedPage > Math.max(1, Math.ceil(data.total / data.page_size))) {
         jobsPage = 1;
         jobs();
         return;
       }
-      renderJobs(data);
+      renderJobs(data, query, generation);
     } catch (error) {
       if (jobsController === controller && !isSuperseded(controller, error)) failure($("jobs-status"), "Jobs could not be read.", error, jobsObservedAt, "Results above");
     }
@@ -377,7 +413,8 @@
     data.incidents.forEach((entry) => root.append(incident(entry)));
   }
 
-  async function detail(jobId) {
+  async function detail(jobId, generation = jobQueryGeneration) {
+    if (generation !== jobQueryGeneration) return;
     if (!isUuid(jobId)) {
       clearDetail("The selected job identifier is invalid.");
       return;
@@ -391,7 +428,12 @@
     root.textContent = `Loading job ${jobId}…`;
     try {
       const data = validateDetail(await read(`/api/operations/jobs/${encodeURIComponent(jobId)}`, controller), jobId);
-      if (version === detailVersion && selectedJob === jobId && detailController === controller) renderDetail(data);
+      if (version !== detailVersion || selectedJob !== jobId || detailController !== controller || generation !== jobQueryGeneration) return;
+      if (!matchesJobQuery(data, appliedJobQuery)) {
+        clearDetail("The selected job no longer matches the applied filters.");
+        return;
+      }
+      renderDetail(data);
     } catch (error) {
       if (version === detailVersion && selectedJob === jobId && detailController === controller && !isSuperseded(controller, error)) {
         root.className = "detail-empty error";
@@ -408,11 +450,11 @@
     $("incidents-status").textContent = `Loading incidents…${staleSuffix(incidentsObservedAt, "Results above")}`;
     $("incidents-previous").disabled = true;
     $("incidents-next").disabled = true;
-    const params = new URLSearchParams({ state: $("incident-state").value, page: String(requestedPage), page_size: "25" });
+    const params = new URLSearchParams({ state: appliedIncidentState, page: String(requestedPage), page_size: "25" });
     try {
-      const data = validateIncidents(await read(`/api/operations/incidents?${params}`, controller), requestedPage);
+      const data = validateIncidents(await read(`/api/operations/incidents?${params}`, controller), requestedPage, appliedIncidentState);
       if (incidentsController !== controller) return;
-      if (data.total > 0 && data.items.length === 0 && requestedPage > Math.ceil(data.total / data.page_size)) {
+      if (data.items.length === 0 && requestedPage > Math.max(1, Math.ceil(data.total / data.page_size))) {
         incidentsPage = 1;
         incidents();
         return;
@@ -444,12 +486,20 @@
   });
   $("job-filters").addEventListener("submit", (event) => {
     event.preventDefault();
+    appliedJobQuery = draftJobQuery();
     jobsPage = 1;
-    jobs({ contextChanged: true });
+    jobQueryGeneration += 1;
+    jobsObservedAt = null;
+    clearJobRows();
+    clearDetail("Filter context changed. Select a matching job to inspect it.");
+    jobs();
   });
   $("incident-filters").addEventListener("submit", (event) => {
     event.preventDefault();
+    appliedIncidentState = $("incident-state").value;
     incidentsPage = 1;
+    incidentsObservedAt = null;
+    clearIncidentRows();
     incidents();
   });
   $("jobs-previous").addEventListener("click", () => {

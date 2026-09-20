@@ -51,6 +51,7 @@ def seed_job(db, *, state="pending", created_at=None, completed=False, correlati
 def test_operations_summary_filters_pagination_and_allowlisted_detail(client, db):
     now = datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)
     pending, _ = seed_job(db, state="pending", created_at=now)
+    pending.last_error_message = "control-\x1b-canary"
     retry, _ = seed_job(db, state="retry_wait", created_at=now + timedelta(seconds=1))
     completed, lead = seed_job(
         db, state="completed", created_at=now + timedelta(seconds=2), completed=True
@@ -127,6 +128,7 @@ def test_operations_summary_filters_pagination_and_allowlisted_detail(client, db
         listed.text,
         filtered.text,
         found_submission.text,
+        client.get(f"/api/operations/jobs/{pending.id}").text,
         detail.text,
         client.get("/api/operations/incidents").text,
         invalid_id.text,
@@ -143,6 +145,7 @@ def test_operations_summary_filters_pagination_and_allowlisted_detail(client, db
         "workflow-secret-canary",
         "incident-canary",
         "provider-body-canary",
+        "control-\\u001b-canary",
     ]:
         assert canary not in serialized
     assert "payload_json" not in body and "lease_token" not in body

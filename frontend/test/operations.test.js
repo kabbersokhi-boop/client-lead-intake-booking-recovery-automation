@@ -89,12 +89,12 @@ function job(id, state = "pending") {
   };
 }
 
-function jobs(items = [job(jobA)]) {
-  return { observed_at: observed, total: items.length, page: 1, page_size: 25, items };
+function jobs(items = [job(jobA)], overrides = {}) {
+  return { observed_at: observed, total: items.length, page: 1, page_size: 25, items, ...overrides };
 }
 
-function incidents(items = []) {
-  return { observed_at: observed, total: items.length, page: 1, page_size: 25, items };
+function incidents(items = [], overrides = {}) {
+  return { observed_at: observed, total: items.length, page: 1, page_size: 25, items, ...overrides };
 }
 
 function incident() {
@@ -255,6 +255,178 @@ test("filtering clears an old selection and delayed detail cannot overwrite unkn
   assert.doesNotMatch(harness.elements.get("job-detail").textContent, /retry_wait/);
 });
 
+test("draft job and incident controls do not affect Refresh or the selected detail", async () => {
+  const harness = createHarness();
+  await settleInitial(harness);
+  const select = findAll(harness.elements.get("jobs-body"), (node) => node.className === "job-select")[0];
+  select.dispatch("click");
+  harness.findRequest(`/jobs/${jobA}`).resolve(detail(jobA));
+  await harness.flush();
+
+  harness.elements.get("job-state").value = "blocked";
+  harness.elements.get("lookup-kind").value = "correlation_id";
+  harness.elements.get("lookup-id").value = "88888888-8888-4888-8888-888888888888";
+  harness.elements.get("incident-state").value = "open";
+  const refreshStart = harness.requests.length;
+  harness.elements.get("refresh").dispatch("click");
+  const refreshRequests = harness.requests.slice(refreshStart);
+  const jobsRequest = refreshRequests.find((request) => request.url.includes("/jobs?"));
+  const incidentsRequest = refreshRequests.find((request) => request.url.includes("/incidents?"));
+  assert.doesNotMatch(jobsRequest.url, /blocked|lookup_id|correlation_id/);
+  assert.match(incidentsRequest.url, /state=all/);
+  refreshRequests.find((request) => request.url.includes("/summary")).resolve(summary());
+  jobsRequest.resolve(jobs([job(jobA)]));
+  incidentsRequest.resolve(incidents());
+  refreshRequests.find((request) => request.url.includes(`/jobs/${jobA}`)).resolve(detail(jobA, "completed"));
+  await harness.flush();
+  assert.match(harness.elements.get("job-detail").textContent, /Current statecompleted/);
+});
+
+test("applying a query removes stale rows and stale row clicks cannot recreate selection", async () => {
+  const harness = createHarness({ abortAware: false });
+  await settleInitial(harness);
+  const staleSelect = findAll(harness.elements.get("jobs-body"), (node) => node.className === "job-select")[0];
+  harness.elements.get("lookup-id").value = "88888888-8888-4888-8888-888888888888";
+  const applyStart = harness.requests.length;
+  harness.elements.get("job-filters").dispatch("submit");
+  assert.equal(harness.elements.get("jobs-body").children.length, 0);
+  assert.match(harness.elements.get("job-detail").textContent, /Filter context changed/);
+  staleSelect.dispatch("click");
+  assert.equal(harness.requests.length, applyStart + 1);
+  harness.findRequest("/jobs?", applyStart).resolve(jobs([]));
+  await harness.flush();
+  assert.match(harness.elements.get("jobs-body").textContent, /No job matches this valid identifier/);
+  assert.doesNotMatch(harness.elements.get("job-detail").textContent, /Loading job/);
+});
+
+test("old detail completing before a new empty query cannot restore the selection", async () => {
+  const harness = createHarness({ abortAware: false });
+  await settleInitial(harness);
+  findAll(harness.elements.get("jobs-body"), (node) => node.className === "job-select")[0].dispatch("click");
+  const oldDetail = harness.findRequest(`/jobs/${jobA}`);
+  harness.elements.get("lookup-id").value = "88888888-8888-4888-8888-888888888888";
+  const applyStart = harness.requests.length;
+  harness.elements.get("job-filters").dispatch("submit");
+  oldDetail.resolve(detail(jobA));
+  await harness.flush();
+  assert.match(harness.elements.get("job-detail").textContent, /Filter context changed/);
+  harness.findRequest("/jobs?", applyStart).resolve(jobs([]));
+  await harness.flush();
+  assert.match(harness.elements.get("jobs-body").textContent, /No job matches/);
+  assert.match(harness.elements.get("job-detail").textContent, /Filter context changed/);
+});
+
+test("pagination uses the applied query and safely restarts after a result set shrinks", async () => {
+  const harness = createHarness();
+  await settleInitial(harness, jobs([job(jobA)], { total: 26 }));
+  harness.elements.get("job-state").value = "blocked";
+  harness.elements.get("lookup-id").value = "88888888-8888-4888-8888-888888888888";
+  const nextStart = harness.requests.length;
+  harness.elements.get("jobs-next").dispatch("click");
+  const pageTwo = harness.findRequest("/jobs?", nextStart);
+  assert.match(pageTwo.url, /page=2/);
+  assert.doesNotMatch(pageTwo.url, /blocked|lookup_id/);
+  pageTwo.resolve(jobs([], { total: 0, page: 2 }));
+  await harness.flush();
+  const reset = harness.findRequest("/jobs?", nextStart + 1);
+  assert.match(reset.url, /page=1/);
+  reset.resolve(jobs([]));
+  await harness.flush();
+  assert.equal(harness.elements.get("jobs-page").textContent, "Page 1");
+});
+
+test("rapid Apply leaves only the newest query generation visible", async () => {
+  const harness = createHarness({ abortAware: false });
+  await settleInitial(harness);
+  const start = harness.requests.length;
+  harness.elements.get("lookup-id").value = jobA;
+  harness.elements.get("job-filters").dispatch("submit");
+  harness.elements.get("lookup-id").value = jobB;
+  harness.elements.get("job-filters").dispatch("submit");
+  const first = harness.requests[start];
+  const second = harness.requests[start + 1];
+  assert.match(first.url, new RegExp(jobA));
+  assert.match(second.url, new RegExp(jobB));
+  second.resolve(jobs([job(jobB)], { observed_at: "2026-09-20T15:00:00Z" }));
+  first.resolve(jobs([job(jobA)], { observed_at: "2026-09-20T14:00:00Z" }));
+  await harness.flush();
+  assert.match(harness.elements.get("jobs-body").textContent, new RegExp(jobB));
+  assert.doesNotMatch(harness.elements.get("jobs-body").textContent, new RegExp(jobA));
+});
+
+test("Previous uses the applied query after draft controls change", async () => {
+  const harness = createHarness();
+  await settleInitial(harness, jobs([job(jobA)], { total: 26 }));
+  const nextStart = harness.requests.length;
+  harness.elements.get("jobs-next").dispatch("click");
+  harness.findRequest("/jobs?", nextStart).resolve(jobs([job(jobB)], { total: 26, page: 2 }));
+  await harness.flush();
+  harness.elements.get("job-state").value = "needs_review";
+  harness.elements.get("lookup-id").value = "88888888-8888-4888-8888-888888888888";
+  const previousStart = harness.requests.length;
+  harness.elements.get("jobs-previous").dispatch("click");
+  const previous = harness.findRequest("/jobs?", previousStart);
+  assert.match(previous.url, /page=1/);
+  assert.doesNotMatch(previous.url, /needs_review|lookup_id/);
+  previous.resolve(jobs([job(jobA)], { total: 26 }));
+  await harness.flush();
+  assert.equal(harness.elements.get("jobs-page").textContent, "Page 1");
+});
+
+test("selected detail is cleared if worker progress makes it fail the applied state", async () => {
+  const harness = createHarness();
+  await settleInitial(harness);
+  harness.elements.get("job-state").value = "pending";
+  const applyStart = harness.requests.length;
+  harness.elements.get("job-filters").dispatch("submit");
+  harness.findRequest("/jobs?", applyStart).resolve(jobs([job(jobA)]));
+  await harness.flush();
+  findAll(harness.elements.get("jobs-body"), (node) => node.className === "job-select")[0].dispatch("click");
+  harness.findRequest(`/jobs/${jobA}`, applyStart).resolve(detail(jobA, "pending"));
+  await harness.flush();
+  const refreshStart = harness.requests.length;
+  harness.elements.get("refresh").dispatch("click");
+  harness.findRequest("/summary", refreshStart).resolve(summary({ completed: 1 }));
+  harness.findRequest("/jobs?", refreshStart).resolve(jobs([]));
+  harness.findRequest("/incidents?", refreshStart).resolve(incidents());
+  harness.findRequest(`/jobs/${jobA}`, refreshStart).resolve(detail(jobA, "completed"));
+  await harness.flush();
+  assert.match(harness.elements.get("job-detail").textContent, /no longer matches/);
+});
+
+test("a late mismatching detail cannot clear the newer selected job", async () => {
+  const harness = createHarness({ abortAware: false });
+  await settleInitial(harness, jobs([job(jobA), job(jobB)]));
+  harness.elements.get("job-state").value = "pending";
+  const applyStart = harness.requests.length;
+  harness.elements.get("job-filters").dispatch("submit");
+  harness.findRequest("/jobs?", applyStart).resolve(jobs([job(jobA), job(jobB)]));
+  await harness.flush();
+  const selects = findAll(harness.elements.get("jobs-body"), (node) => node.className === "job-select");
+  const detailStart = harness.requests.length;
+  selects[0].dispatch("click");
+  selects[1].dispatch("click");
+  const oldDetail = harness.findRequest(`/jobs/${jobA}`, detailStart);
+  const currentDetail = harness.findRequest(`/jobs/${jobB}`, detailStart);
+  currentDetail.resolve(detail(jobB, "pending"));
+  oldDetail.resolve(detail(jobA, "completed"));
+  await harness.flush();
+  assert.match(harness.elements.get("job-detail").textContent, new RegExp(jobB));
+  assert.doesNotMatch(harness.elements.get("job-detail").textContent, /no longer matches/);
+});
+
+test("a valid-shaped success cannot return jobs outside the applied lookup", async () => {
+  const harness = createHarness();
+  await settleInitial(harness);
+  harness.elements.get("lookup-id").value = "88888888-8888-4888-8888-888888888888";
+  const applyStart = harness.requests.length;
+  harness.elements.get("job-filters").dispatch("submit");
+  harness.findRequest("/jobs?", applyStart).resolve(jobs([job(jobA)]));
+  await harness.flush();
+  assert.match(harness.elements.get("jobs-status").textContent, /incomplete or invalid/);
+  assert.equal(harness.elements.get("jobs-body").children.length, 0);
+});
+
 test("timeouts are visible for the active request while superseded reads remain quiet", async () => {
   const harness = createHarness();
   await settleInitial(harness);
@@ -299,6 +471,14 @@ test("malformed success, validation bodies, wrong identity, and unsafe URLs neve
   await harness.flush();
   assert.match(harness.elements.get("summary-status").textContent, /incomplete or invalid/);
   assert.match(harness.elements.get("state-counts").textContent, /pending1/);
+
+  const oversizedStart = harness.requests.length;
+  harness.elements.get("refresh").dispatch("click");
+  harness.findRequest("/summary", oversizedStart).resolve(summary());
+  harness.findRequest("/jobs?", oversizedStart).resolve(jobs(Array.from({ length: 26 }, () => job(jobA)), { total: 0 }));
+  harness.findRequest("/incidents?", oversizedStart).resolve(incidents());
+  await harness.flush();
+  assert.match(harness.elements.get("jobs-status").textContent, /incomplete or invalid/);
 
   harness.elements.get("lookup-id").value = "not-a-uuid";
   const validationStart = harness.requests.length;

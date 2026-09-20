@@ -89,7 +89,7 @@ def _safe_recorded_text(value: str | None) -> str | None:
     if (
         not value
         or len(value) > 300
-        or any(character in value for character in "\r\n\x00")
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
         or value.lstrip().startswith(("{", "["))
         or SENSITIVE_RECORDED_VALUE_RE.search(value)
     ):
