@@ -125,9 +125,9 @@ def _html_message(
         f"<p>Hello {html.escape(greeting_name)},</p>{body}{details}"
         "<p style=\"margin-top:24px;padding-top:16px;border-top:1px solid #d9e2ec;"
         "font-size:13px;color:#52667a\"><strong>Development demonstration:</strong> "
-        "This message was sent to a local test inbox. It does not confirm a real commercial "
-        "service or external calendar booking.</p>"
-        "<p>Regards,<br>Automation demonstration</p></body></html>"
+        "This message was sent to a local test inbox. It does not reserve a technician, "
+        "confirm commercial service, or reserve an external calendar.</p>"
+        "<p>Regards,<br>Local automation demonstration</p></body></html>"
     )
 
 
@@ -184,21 +184,22 @@ class LifecycleService:
 
         service_label = _service_label(lead.service_type)
         subject = (
-            f"Follow-up: {service_label} request"
+            f"Checking in about your {service_label.lower()} request"
             if service_label
-            else "Following up on your service request"
+            else "Checking in about your service request"
         )
         details = _detail_rows(lead)
         paragraphs = [
-            "Thank you for your enquiry. This follow-up confirms that the saved request "
-            "is ready for review."
+            "Thank you for getting in touch about your home comfort service request.",
+            "We have kept the details you shared with this request. To continue in this "
+            "demonstration, use the booking option shown with the saved request.",
         ]
         plain_text = (
-            f"Hello {lead.full_name},\n\n{paragraphs[0]}"
-            f"{_plain_details(details)}\n\n"
+            f"Hello {lead.full_name},\n\n" + "\n\n".join(paragraphs)
+            + f"{_plain_details(details)}\n\n"
             "Development demonstration: This message was sent to a local test inbox. "
-            "It does not confirm a real commercial service or external calendar booking.\n\n"
-            "Regards,\nAutomation demonstration"
+            "It does not reserve a technician, confirm commercial service, or reserve an "
+            "external calendar.\n\nRegards,\nLocal automation demonstration"
         )
         self.email_gateway.send(
             lead.email,
@@ -376,14 +377,16 @@ class LifecycleService:
         follow_up = db.scalar(select(FollowUp).where(FollowUp.lead_id == lead.id))
         service_label = _service_label(lead.service_type)
         subject = (
-            f"Appointment confirmed: {service_label}"
+            f"Appointment details saved: {service_label}"
             if service_label
-            else "Appointment confirmed"
+            else "Appointment details saved"
         )
-        paragraphs = ["Your saved demonstration appointment is confirmed."]
+        paragraphs = [
+            "Your appointment details have been saved for the time shown below."
+        ]
         if follow_up and follow_up.status == "cancelled":
             paragraphs.append(
-                "The pending follow-up for this request was cancelled after the "
+                "The pending follow-up for this request was cancelled because the "
                 "appointment was saved."
             )
         details = _detail_rows(lead, appointment_text)
@@ -392,8 +395,8 @@ class LifecycleService:
             + "\n\n".join(paragraphs)
             + _plain_details(details)
             + "\n\nDevelopment demonstration: This message was sent to a local test inbox. "
-            "It does not confirm a real commercial service or external calendar booking.\n\n"
-            "Regards,\nAutomation demonstration"
+            "It does not reserve a technician, confirm commercial service, or reserve an "
+            "external calendar.\n\nRegards,\nLocal automation demonstration"
         )
         self.email_gateway.send(
             lead.email,

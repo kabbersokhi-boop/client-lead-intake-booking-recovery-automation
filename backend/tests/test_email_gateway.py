@@ -28,6 +28,17 @@ except EmailDeliveryError:
     pass
 else:
     raise AssertionError('CR/LF subject was accepted')
+try:
+    gateway.build_message(
+        'maya@example.test\\nBcc: attacker@example.test',
+        'Safe subject',
+        'Plain',
+        '<p>Plain</p>',
+    )
+except EmailDeliveryError:
+    pass
+else:
+    raise AssertionError('CR/LF recipient was accepted')
 """
     result = subprocess.run(
         [sys.executable, "-c", code],

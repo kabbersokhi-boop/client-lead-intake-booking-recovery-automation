@@ -77,7 +77,7 @@
   function successView(body, payload) {
     if (!verifiedSuccess(body, payload)) return null;
     return {
-      title: body.intake_state === "replayed" ? "Lead replayed safely" : "Lead accepted",
+      title: body.intake_state === "replayed" ? "Request replayed safely" : "Request saved",
       intakeState: body.intake_state,
       correlationId: body.correlation_id,
       crmLeadId: body.crm_lead_id,
@@ -165,7 +165,10 @@
   function bookingView(body, payload) {
     if (!verifiedBooking(body, payload)) return null;
     return {
-      title: body.booking_state === "replayed" ? "Booking replayed safely" : "Appointment booked",
+      title:
+        body.booking_state === "replayed"
+          ? "Demonstration appointment replayed safely"
+          : "Demonstration appointment saved",
       appointmentId: body.appointment_id,
       appointmentAt: body.appointment_at,
       businessTimezone: body.business_timezone,

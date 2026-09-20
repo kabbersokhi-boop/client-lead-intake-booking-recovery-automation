@@ -136,8 +136,8 @@ function renderQueuedResult(body, payload) {
   resultTitle.textContent = view.title;
   resultIntakeState.textContent = view.intakeState;
   resultCorrelationId.textContent = view.correlationId;
-  resultCrmLeadId.textContent = "Pending — no CRM lead exists yet";
-  resultPipelineStage.textContent = "not created";
+  resultCrmLeadId.textContent = "Pending — no saved CRM lead exists yet";
+  resultPipelineStage.textContent = "not saved yet";
   resultFollowUpStatus.textContent = "not scheduled";
   resultFollowUpDue.textContent = "Not applicable";
   resultAiStatus.textContent = `Recovery: ${view.recoveryState}`;
@@ -170,23 +170,23 @@ function renderTrace(trace) {
   const heading = document.createElement("h3");
   heading.textContent = view.customer;
   const subtitle = document.createElement("p");
-  subtitle.textContent = "Persisted development CRM adapter record";
+  subtitle.textContent = "Saved in the local development CRM boundary";
   const fields = document.createElement("dl");
   fields.className = "trace-grid";
   [
     ["Contact", view.contact],
-    ["Pipeline stage", view.pipelineStage],
-    ["Service type", view.serviceType],
+    ["Request status", view.pipelineStage],
+    ["Service request", view.serviceType],
     ["Urgency", view.urgency],
     ["Preferred time", view.preferredTime],
-    ["AI status", view.aiStatus],
+    ["AI enrichment", view.aiStatus],
     ["Needs review", view.needsReview ? "Yes — review required" : "No"],
-    ["Client received", view.clientReceivedAt],
-    ["Persisted", view.persistedAt],
+    ["Received from form", view.clientReceivedAt],
+    ["Saved at", view.persistedAt],
     ["Follow-up status", view.followUpStatus],
     ["Follow-up due", formatBusinessTime(view.followUpDueAt)],
     ["Follow-up completed", formatBusinessTime(view.followUpCompletedAt)],
-    ["Booking state", view.bookingStatus],
+    ["Appointment status", view.bookingStatus],
     ["Appointment ID", view.appointmentId],
     ["Appointment time", formatBusinessTime(view.appointmentAt, view.appointmentTimezone)],
     ["Confirmation sent", formatBusinessTime(view.confirmationSentAt)],
@@ -220,7 +220,7 @@ sampleLeadButton.addEventListener("click", () => {
     form.elements[field].value = value;
   });
   status.className = "";
-  status.textContent = "Sample synthetic lead loaded. You can edit any field before submitting.";
+  status.textContent = "Sample synthetic request loaded. You can edit any field before submitting.";
   form.elements.full_name.focus();
 });
 
@@ -228,7 +228,7 @@ bookingForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!acceptedLead) {
     bookingStatus.className = "error";
-    bookingStatus.textContent = "Submit and verify a lead before booking.";
+    bookingStatus.textContent = "Submit and verify a request before booking.";
     return;
   }
   bookingStatus.className = "";

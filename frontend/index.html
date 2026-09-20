@@ -3,19 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Website Lead Intake | Automation Demo</title>
+    <title>Service Request Intake | Local Automation Demo</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="shell">
       <header class="hero">
-        <p class="eyebrow">Live automation demo</p>
+        <p class="eyebrow">Local automation demonstration</p>
         <div class="hero-heading">
           <div>
-            <h1>Website Lead Intake</h1>
+            <h1>Service Request Intake</h1>
             <p>
-              Create a synthetic customer enquiry, schedule its follow-up, and trace it
-              through booking or contact in a controlled lifecycle demonstration.
+              Submit a synthetic heating or cooling service request, then trace its saved
+              lifecycle through follow-up or booking.
             </p>
           </div>
           <div><p class="source-label">Demo source: Website enquiry</p><a class="text-link" href="/operations.html">Automation Operations</a></div>
@@ -30,12 +30,12 @@
             <li><span>1</span>n8n receives the webhook</li>
             <li><span>2</span>Customer data is validated and normalized</li>
             <li><span>3</span>NVIDIA NIM extracts structured service context</li>
-            <li><span>4</span>The development CRM adapter persists the lead</li>
+            <li><span>4</span>The local development CRM boundary saves the request</li>
             <li><span>5</span>A follow-up is scheduled for email-capable leads</li>
-            <li><span>6</span>Booking cancels that follow-up and confirms the appointment</li>
+            <li><span>6</span>Booking saves the appointment, cancels the follow-up, and sends a local confirmation</li>
           </ol>
           <div class="flow" aria-label="Automation flow">
-            <span>Website</span><b>→</b><span>n8n</span><b>→</b><span>AI enrichment</span><b>→</b><span>CRM lifecycle</span><b>→</b><span>Mailpit</span>
+            <span>Website</span><b>→</b><span>n8n</span><b>→</b><span>AI enrichment</span><b>→</b><span>Saved request</span><b>→</b><span>Mailpit</span>
           </div>
           <p class="fallback-note">
             AI enrichment has a safe fallback; lead intake does not depend on AI availability.
@@ -46,7 +46,7 @@
           <div class="form-heading">
             <div>
               <p class="eyebrow">Synthetic enquiry</p>
-              <h2 id="form-title">Create a test lead</h2>
+              <h2 id="form-title">Submit a synthetic service request</h2>
             </div>
             <button id="sample-lead" class="text-button" type="button">Use sample lead</button>
           </div>
@@ -55,34 +55,34 @@
             <label>Email<input name="email" type="email" autocomplete="email" maxlength="254" /></label>
             <label>Phone<input name="phone" type="tel" autocomplete="tel" maxlength="50" /></label>
             <label>Message<textarea name="message" rows="6" maxlength="5000" required></textarea></label>
-            <button type="submit">Submit Test Lead</button>
+            <button type="submit">Submit synthetic request</button>
             <p id="form-status" role="status" aria-live="polite"></p>
           </form>
           <section id="intake-result" class="intake-result" aria-live="polite" hidden>
             <div class="result-heading">
               <div>
                 <p class="result-kicker">Verified result</p>
-                <h3 id="result-title">Lead accepted</h3>
+                <h3 id="result-title">Request saved</h3>
               </div>
               <span id="result-ai-status" class="status-chip"></span>
             </div>
             <dl class="result-grid">
-              <div><dt>Intake state</dt><dd id="result-intake-state"></dd></div>
+              <div><dt>Saved request state</dt><dd id="result-intake-state"></dd></div>
               <div><dt>Correlation ID</dt><dd id="result-correlation-id" class="identifier"></dd></div>
-              <div><dt>CRM Lead ID</dt><dd id="result-crm-lead-id" class="identifier"></dd></div>
-              <div><dt>Pipeline stage</dt><dd id="result-pipeline-stage"></dd></div>
+              <div><dt>Saved CRM lead ID</dt><dd id="result-crm-lead-id" class="identifier"></dd></div>
+              <div><dt>Request status</dt><dd id="result-pipeline-stage"></dd></div>
               <div><dt>Follow-up</dt><dd id="result-follow-up-status"></dd></div>
               <div><dt>Follow-up due</dt><dd id="result-follow-up-due"></dd></div>
             </dl>
             <button id="inspect-trace" class="secondary" type="button">Inspect persisted trace</button>
             <section id="booking-panel" class="booking-panel" hidden>
               <p class="result-kicker">Next lifecycle step</p>
-              <h3>Book a synthetic appointment</h3>
+              <h3>Save a demonstration appointment</h3>
               <p>Times are entered and displayed in Surrey business time (America/Vancouver).</p>
               <p id="booking-customer-reference" class="booking-customer-reference"></p>
               <form id="booking-form">
                 <label>Appointment date and time<input id="appointment-local" name="appointment_local" type="datetime-local" required /></label>
-                <button type="submit">Book Test Appointment</button>
+                <button type="submit">Save demonstration appointment</button>
                 <p id="booking-status" role="status" aria-live="polite"></p>
               </form>
               <article id="booking-result" class="booking-result" hidden>
@@ -104,7 +104,7 @@
         <div class="trace-heading">
           <div>
             <p class="eyebrow">Verification</p>
-            <h2 id="trace-title">Persisted lead trace</h2>
+            <h2 id="trace-title">Saved request trace</h2>
           </div>
           <p>Inspect lead, follow-up, appointment, and safe audit state by correlation ID.</p>
         </div>

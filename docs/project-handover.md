@@ -24,7 +24,9 @@ Future phases must update this document before their final commit so the reposit
   and corrected same-key refresh without duplication. Isolated failure execution `1662` failed
   visibly without changing customer-critical durable counts. See
   `docs/phase-5-verification.md` for exact evidence and limitations.
-- Phase 6 GHL integration and Phase 7 final presentation work have not started.
+- Phase 6 live GoHighLevel integration has not started. Phase 7A presentation hardening is in
+  progress at the current worktree checkpoint; Phase 7 screenshots, final case study, rehearsal,
+  and final interview PDF remain incomplete.
 - Approval does not assert universal bug freedom, production readiness, or a guaranteed hiring outcome.
 
 Before new work, verify that current `HEAD`, `origin/main`, the worktree, runtime, and CI still match the intended starting point. Do not assume this recorded SHA is still current.
@@ -97,6 +99,29 @@ Additional retained Phase 4 reference data:
 - Authenticated Chrome verification at the approved Phase 4 SHA opened diagnostic execution `283` and directly opened recovery execution `292`. Operations links `283` because its incident durably identifies the workflow; it intentionally renders attempt/job reference `292` as text.
 
 Do not delete, regenerate, cosmetically rewrite, or merge these separate evidence stories. Use retained evidence rather than reactivating fault injection unless a future phase explicitly requires a new controlled test.
+
+## Phase 7A diagnostic incident review
+
+Read-only inspection of current Operations projections, retained n8n execution rows, and the
+recovery resolution rules established the following. Do not rewrite any execution history or
+incident merely to improve the demonstration.
+
+- Execution `272` is a `WrappedExecutionError` at `Validate Prepared Backlog`: the diagnostic
+  precondition rejected input because it was not the expected bounded jobs array. Its incident is
+  open and unlinked because no durable CRM-write job, attempt, or correlation was created.
+- Execution `276` is an earlier `NodeApiError` at `Diagnostic CRM Write Without Recovery`: a
+  controlled local rate-limit failure. Its incident is open and unlinked because it has no
+  durable CRM-write job, failed attempt, or correlation for verified recovery to complete.
+- Execution `283` is the canonical controlled rate-limit failure. Its durable failed attempt
+  links it to job `e3f7d48d-64c3-4bd0-8d44-6d9d2d2c4e69` and correlation
+  `236169e3-7c3e-4243-8a94-251ac4f9869a`; recovery execution `292` verified completion, which
+  truthfully resolved the linked incident. Automatic Error Workflow execution `284` remains its
+  preserved successful recorder evidence.
+
+The only supported incident-resolution behavior resolves open incidents for a linked job after
+verified CRM completion. It does not provide an arbitrary dismiss action. Therefore `272` and
+`276` are intentionally unchanged and remain visible as historical unlinked incidents; `283` and
+`284` are preserved exactly.
 
 ## Current architecture and responsibility split
 
@@ -174,9 +199,24 @@ If live GHL API access is available, distinguish verified API behavior from UI-o
 
 Never rename the development CRM as GHL, imply a live GHL result that was not observed, or hide trial/account limitations.
 
-## Phase 7 — final polish and teaching
+## Phase 7 — presentation hardening and remaining work
 
-Phase 7 is committed future work, not completed work. It must include all sections below.
+Phase 7A improves only presentation clarity. It preserves the approved architecture, retained
+execution history, recovery truth model, and read-only Operations surface. The deterministic
+follow-up and appointment emails now use neutral furnace/air-conditioning service wording,
+retain persisted details only, provide explicit local-development disclosure, and continue to
+state that no technician, commercial service, or external calendar is reserved. Multipart
+alternatives, escaping, CR/LF header safety, booking idempotency, and follow-up cancellation are
+unchanged. The self-contained browser-first walkthrough is
+`docs/interview-demo-runbook.md`; it includes the `272`/`276`/`283` distinction and the Phase 5
+Make `1614`/`1627`/`1654` debugging story.
+
+GoHighLevel live integration remains unverified and is not part of this pass. The CRM boundary
+remains `DevelopmentCRMProvider`; no development component may be relabelled as GoHighLevel.
+
+The remaining Phase 7 work is screenshot selection/redaction, final README case-study polish,
+browser rehearsal, and rebuilding the final interview PDF. Do not treat those deliverables as
+complete.
 
 ### HVAC business wording and email polish
 

@@ -2,7 +2,7 @@
 
 A fresh technical-interview capability demonstration for an end-to-end enquiry and booking lifecycle. All example data is synthetic. This is not a production client deployment and does not use a fictional product or client brand.
 
-> Current scope: Phase 1 intake, Phase 2 lifecycle/booking, Phase 3 bounded CRM-write recovery, Phase 4 read-only operations, and a Phase 5 management-reporting boundary live-verified through Make to an upsert-like Google Sheets destination. WhatsApp, real calendar/email providers, and a vendor CRM integration are not implemented. The CRM boundary remains an explicit development adapter.
+> Current scope: Phases 1–5 are implemented and verified for a local synthetic reference demo: intake, lifecycle/booking, bounded CRM-write recovery, read-only operations, and a Phase 5 management-reporting boundary live-verified through Make to an upsert-like Google Sheets destination. WhatsApp, real calendar/email providers, and live GoHighLevel integration are not implemented or verified. The CRM boundary remains `DevelopmentCRMProvider`, an explicit development adapter.
 
 ## Architecture
 
@@ -95,7 +95,7 @@ ruff check app tests
 
 Tests use SQLite for fast API/schema tests and disposable PostgreSQL for migration, persistence, and concurrent replay coverage. Node tests execute the exported n8n code-node logic with deterministic fixtures and browser retry helpers. They never call NVIDIA NIM or n8n. Public GitHub Actions provisions PostgreSQL and runs all deterministic tests without secrets.
 
-The current Phase 3 verifier discovers 89 backend/Python/PostgreSQL tests, 13 browser-helper tests, and 36 workflow-code/structure tests. Live n8n, NVIDIA, and Mailpit checks remain separate and are documented rather than silently mocked.
+The established deterministic verifier currently runs 98 Python tests (SQLite and disposable PostgreSQL coverage), 28 frontend/helper tests, and 43 workflow-code/structure tests: 169 total. Live n8n, NVIDIA, Mailpit, and Make checks remain separate evidence rather than silently mocked. The frontend/helper count is not a claim that every check drives a real browser, and the Python count is not a claim that every test is PostgreSQL-specific.
 
 ## Live verification
 
@@ -106,6 +106,8 @@ Phase 3 evidence and operations are in [docs/phase-3-verification.md](docs/phase
 Open [http://localhost:18000/operations.html](http://localhost:18000/operations.html) for the local, synthetic, read-only operations view. Refresh job-state counts, filter or paste an exact job/submission/correlation UUID, select a job, inspect persisted attempts and incidents, then follow its correlation trace or safely constructed local n8n execution link. The page never sends the adapter key to the browser and cannot claim, retry, requeue, resolve, send, or mutate records. Phase 4 verification and self-review are in [docs/phase-4-verification.md](docs/phase-4-verification.md) and [docs/phase-4-self-review.md](docs/phase-4-self-review.md).
 
 Phase 5 reporting semantics, live Make/Google Sheets evidence, failure isolation, and limitations are recorded in [docs/phase-5-verification.md](docs/phase-5-verification.md) and [docs/phase-5-self-review.md](docs/phase-5-self-review.md). Do not configure the private Make webhook in source-controlled files.
+
+For an interview-ready, browser-first local walkthrough, see [docs/interview-demo-runbook.md](docs/interview-demo-runbook.md). It preserves the retained failure and reporting stories without asking the presenter to recreate faults.
 
 ## Security
 

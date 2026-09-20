@@ -71,12 +71,19 @@ def test_due_follow_up_sends_once_and_moves_pipeline_to_contacted(db):
     assert "follow_up.sent" in event_types
     assert "pipeline.stage_changed" in event_types
     message = gateway.messages[0]
-    assert message["subject"] == "Follow-up: Furnace Service request"
+    assert message["subject"] == "Checking in about your furnace service request"
+    assert (
+        "Thank you for getting in touch about your home comfort service request."
+        in message["plain_text"]
+    )
+    assert "use the booking option shown with the saved request" in message["plain_text"]
     assert "Service: Furnace Service" in message["plain_text"]
     assert "Location: Surrey" in message["plain_text"]
     assert "Preferred time: Tuesday afternoon" in message["plain_text"]
     assert "Development demonstration" in message["plain_text"]
+    assert "does not reserve a technician" in message["plain_text"]
     assert "<h1" in message["html_text"]
+    assert "does not reserve a technician" in message["html_text"]
 
 
 def test_follow_up_cannot_send_before_due(db):
@@ -141,7 +148,10 @@ def test_booking_confirmation_sends_once_on_replay(db):
     )
     assert expected_local.strftime("%A, %B %d, %Y at %I:%M %p") in message["plain_text"]
     assert settings.business_timezone in message["plain_text"]
-    assert "pending follow-up" in message["plain_text"]
+    assert message["subject"] == "Appointment details saved: Furnace Service"
+    assert "appointment details have been saved" in message["plain_text"]
+    assert "pending follow-up for this request was cancelled" in message["plain_text"]
+    assert "does not reserve a technician" in message["plain_text"]
 
 
 def test_cancelled_follow_up_never_sends_after_due(db):

@@ -68,7 +68,7 @@ test("only the documented intake contract confirms browser success", () => {
   };
   assert.equal(verifiedSuccess(valid, payload), true);
   assert.deepEqual(successView(valid, payload), {
-    title: "Lead accepted",
+    title: "Request saved",
     intakeState: "created",
     correlationId: payload.correlation_id,
     crmLeadId: valid.crm_lead_id,
@@ -103,7 +103,7 @@ test("fallback AI outcomes keep verified intake success but use warning presenta
     payload,
   );
 
-  assert.equal(view.title, "Lead accepted");
+  assert.equal(view.title, "Request saved");
   assert.equal(view.aiStatusTone, "warning");
 });
 
