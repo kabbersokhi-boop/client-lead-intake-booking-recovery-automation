@@ -7,10 +7,16 @@ Future phases must update this document before their final commit so the reposit
 ## Current checkpoint
 
 - Review date: 2026-09-21.
+- Approved Phase 5 implementation SHA: `69c2a9e6c65f939ecd59317d51f5a14d2afa5db3`.
+- Phase 5 implementation exact-SHA CI: run `35535162885`, job `106142768361`, successful.
+- Phase 5 CI counts: 98 backend/Python/PostgreSQL tests, 28 frontend/helper tests, and
+  43 workflow tests, 169 total.
 - Approved Phase 4 SHA: `3eba4ff17084ab953942b4928ce818ac11d6cf2a`.
 - Previous Phase 4 baseline: `881bd0db75ca9b3e246fc716d72463c28f9d57e8`.
-- Exact-SHA CI: run `35523002102`, job `106110225411`, successful at the approved SHA.
-- CI counts: 93 backend/Python/PostgreSQL tests, 28 frontend/helper tests, and 36 workflow tests, 157 total. These categories must not be described as though every frontend test is a real-browser test or every backend test is a PostgreSQL test.
+- Phase 4 exact-SHA CI: run `35523002102`, job `106110225411`, successful at the approved SHA.
+- Phase 4 CI counts: 93 backend/Python/PostgreSQL tests, 28 frontend/helper tests, and
+  36 workflow tests, 157 total. These categories must not be described as though every frontend
+  test is a real-browser test or every backend test is a PostgreSQL test.
 - Phases 1–4 are approved for their defined local reference-demo scope.
 - Phase 5 is implemented and live-verified for the synthetic local reference-demo scope. The
   authenticated aggregate reporting API and separate inactive manual n8n workflow sent real
