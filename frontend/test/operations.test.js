@@ -217,6 +217,52 @@ test("operations browser code uses only read projections and safe DOM rendering"
   assert.match(source, /textContent/);
 });
 
+test("only workflow-scoped local n8n execution routes become links", async () => {
+  const harness = createHarness();
+  await settleInitial(harness);
+  const validUrl = "http://localhost:5678/workflow/phase3-crm-write-diagnostic/executions/283";
+  const validLoopbackUrl = "http://127.0.0.1:5678/workflow/phase3-crm-write-diagnostic/executions/283";
+  const variants = [
+    { workflow_reference: "phase3-crm-write-diagnostic", execution_reference: "283", execution_url: validUrl },
+    { workflow_reference: "phase3-crm-write-diagnostic", execution_reference: "283", execution_url: validLoopbackUrl },
+    { workflow_reference: null, execution_reference: "283", execution_url: validUrl },
+    { workflow_reference: "phase3/crm-write-diagnostic", execution_reference: "283", execution_url: validUrl },
+    { workflow_reference: "phase3-crm-write-diagnostic", execution_reference: "not-numeric", execution_url: validUrl },
+    { workflow_reference: "phase3-crm-write-diagnostic", execution_reference: "283", execution_url: "http://example.test:5678/workflow/phase3-crm-write-diagnostic/executions/283" },
+    { workflow_reference: "phase3-crm-write-diagnostic", execution_reference: "283", execution_url: "http://localhost:5679/workflow/phase3-crm-write-diagnostic/executions/283" },
+    { workflow_reference: "phase3-crm-write-diagnostic", execution_reference: "283", execution_url: "https://localhost:5678/workflow/phase3-crm-write-diagnostic/executions/283" },
+    { workflow_reference: "phase3-crm-write-diagnostic", execution_reference: "283", execution_url: "http://user:password@localhost:5678/workflow/phase3-crm-write-diagnostic/executions/283" },
+    { workflow_reference: "phase3-crm-write-diagnostic", execution_reference: "283", execution_url: "http://localhost:5678/execution/283" },
+    { workflow_reference: "phase3-crm-write-diagnostic", execution_reference: "283", execution_url: `${validUrl}?query=yes` },
+    { workflow_reference: "phase3-crm-write-diagnostic", execution_reference: "283", execution_url: `${validUrl}?` },
+    { workflow_reference: "phase3-crm-write-diagnostic", execution_reference: "283", execution_url: `${validUrl}#fragment` },
+    { workflow_reference: "phase3-crm-write-diagnostic", execution_reference: "283", execution_url: `${validUrl}#` },
+  ].map((overrides) => ({ ...incident(), ...overrides }));
+  const refreshStart = harness.requests.length;
+  harness.elements.get("refresh").dispatch("click");
+  harness.findRequest("/summary", refreshStart).resolve(summary());
+  harness.findRequest("/jobs?", refreshStart).resolve(jobs());
+  harness.findRequest("/incidents?", refreshStart).resolve(incidents(variants));
+  await harness.flush();
+
+  const links = findAll(harness.elements.get("incidents-list"), (node) => node.tagName === "A");
+  assert.equal(links.length, 2);
+  assert.equal(links[0].href, validUrl);
+  assert.equal(links[0].textContent, "n8n execution 283");
+  assert.equal(findAll(harness.elements.get("incidents-list"), (node) => node.tagName === "SPAN" && node.textContent.startsWith("Execution reference:")).length, 12);
+
+  const detailStart = harness.requests.length;
+  findAll(harness.elements.get("jobs-body"), (node) => node.className === "job-select")[0].dispatch("click");
+  harness.findRequest(`/jobs/${jobA}`, detailStart).resolve(detail(jobA, "completed", {
+    source_execution_reference: "292",
+    source_execution_url: "http://localhost:5678/workflow/phase3-crm-write-recovery/executions/292",
+    attempts: [{ attempt_number: 1, started_at: observed, finished_at: observed, outcome: "completed", status_code: 200, error_class: null, retry_after_raw: null, retry_after_seconds: null, execution_reference: "292", execution_url: "http://localhost:5678/workflow/phase3-crm-write-recovery/executions/292" }],
+  }));
+  await harness.flush();
+  assert.equal(findAll(harness.elements.get("job-detail"), (node) => node.tagName === "A" && node.textContent.startsWith("n8n execution")).length, 0);
+  assert.equal(findAll(harness.elements.get("job-detail"), (node) => node.tagName === "SPAN" && node.textContent === "Execution reference: 292").length, 2);
+});
+
 test("successful refresh re-reads selected detail and labels its observation", async () => {
   const harness = createHarness();
   await settleInitial(harness);
@@ -511,7 +557,7 @@ test("malformed success, validation bodies, wrong identity, and unsafe URLs neve
   findAll(harness.elements.get("jobs-body"), (node) => node.className === "job-select")[0].dispatch("click");
   harness.findRequest(`/jobs/${jobA}`, nextStart).resolve(detail(jobA, "completed", {
     last_error_message: "<img src=x onerror=alert(1)>",
-    attempts: [{ attempt_number: 1, started_at: observed, finished_at: null, outcome: "failed", status_code: 500, error_class: "<script>", retry_after_raw: null, retry_after_seconds: null, execution_reference: "283", execution_url: "http://example.test/execution/283" }],
+    attempts: [{ attempt_number: 1, started_at: observed, finished_at: null, outcome: "failed", status_code: 500, error_class: "<script>", retry_after_raw: null, retry_after_seconds: null, execution_reference: "283", execution_url: "http://example.test/workflow/phase3-crm-write-diagnostic/executions/283" }],
   }));
   await harness.flush();
   const executionNode = findAll(harness.elements.get("job-detail"), (node) => node.textContent === "Execution reference: 283")[0];

@@ -145,7 +145,9 @@ def test_operations_read_projection_uses_postgres_without_mutating_jobs(postgres
                 event_key=f"postgres-operations-{job.id}",
                 job_id=job.id,
                 correlation_id=job.correlation_id,
-                execution_reference="Authorization: pg-incident-canary",
+                workflow_reference="workflow-secret-postgres-canary",
+                execution_reference="515",
+                failed_node="Authorization: pg-incident-canary",
                 error_class="adapter-key-postgres-canary",
                 state="open",
                 created_at=datetime.now(timezone.utc),
@@ -183,6 +185,7 @@ def test_operations_read_projection_uses_postgres_without_mutating_jobs(postgres
         "pg-operations-canary",
         "adapter-key-postgres-canary",
         "provider-body-postgres-canary",
+        "workflow-secret-postgres-canary",
         "pg-incident-canary",
     ]:
         assert canary not in projection

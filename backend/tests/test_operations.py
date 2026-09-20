@@ -57,6 +57,7 @@ def test_operations_summary_filters_pagination_and_allowlisted_detail(client, db
         db, state="completed", created_at=now + timedelta(seconds=2), completed=True
     )
     retry.attempt_count = 2
+    retry.source_execution_reference = "292"
     db.add_all(
         [
             CRMWriteAttempt(
@@ -76,15 +77,17 @@ def test_operations_summary_filters_pagination_and_allowlisted_detail(client, db
             ),
             RecoveryIncident(
                 id=uuid.uuid4(), event_key="linked", job_id=retry.id,
-                correlation_id=retry.correlation_id, execution_reference="720", failed_node="write",
+                correlation_id=retry.correlation_id,
+                workflow_reference="phase3-crm-write-recovery",
+                execution_reference="720", failed_node="write",
                 error_class="http_503", state="resolved", resolved_at=now + timedelta(minutes=1),
                 created_at=now,
             ),
             RecoveryIncident(
                 id=uuid.uuid4(), event_key="open", job_id=pending.id,
                 correlation_id=pending.correlation_id, workflow_reference="workflow-secret-canary",
-                execution_reference="Authorization: Bearer incident-canary",
-                failed_node="provider-body-canary", error_class="adapter-key-canary",
+                execution_reference="515", failed_node="Authorization: Bearer incident-canary",
+                error_class="adapter-key-canary",
                 state="open", created_at=now,
             ),
         ]
@@ -151,21 +154,56 @@ def test_operations_summary_filters_pagination_and_allowlisted_detail(client, db
     assert "payload_json" not in body and "lease_token" not in body
     assert "quota_permit" not in serialized
     assert body["last_error_class"] == "Redacted unsafe recorded value"
-    assert body["source_execution_reference"] == "Redacted unsafe recorded value"
+    assert body["source_execution_reference"] == "292"
+    assert body["source_execution_url"] is None
     assert body["completed_lead"] is None
-    assert body["attempts"][0]["execution_url"] == "http://localhost:5678/execution/703"
+    assert body["attempts"][0]["execution_url"] is None
     assert body["attempts"][1]["execution_url"] is None
     assert body["incidents"][0]["state"] == "resolved"
+    assert body["incidents"][0]["execution_url"] == (
+        "http://localhost:5678/workflow/phase3-crm-write-recovery/executions/720"
+    )
     completed_detail = client.get(f"/api/operations/jobs/{completed.id}").json()
     assert completed_detail["completed_lead"]["id"] == str(lead.id)
 
 
 def test_execution_urls_require_the_configured_loopback_editor_route(monkeypatch):
-    assert _execution_url("283") == "http://localhost:5678/execution/283"
+    assert _execution_url("phase3-crm-write-diagnostic", "283") == (
+        "http://localhost:5678/workflow/phase3-crm-write-diagnostic/executions/283"
+    )
+    for workflow_reference, execution_reference in [
+        (None, "283"),
+        ("phase3-crm-write-diagnostic", None),
+        ("phase3/crm-write-diagnostic", "283"),
+        ("phase3%2fcrm-write-diagnostic", "283"),
+        ("phase3.crm-write-diagnostic", "283"),
+        ("phase3-crm-write-diagnostic", "not-numeric"),
+    ]:
+        assert _execution_url(workflow_reference, execution_reference) is None
+    monkeypatch.setattr(
+        "app.api.operations.settings.n8n_editor_base_url", "http://127.0.0.1:5678"
+    )
+    assert _execution_url("phase3-crm-write-diagnostic", "283") == (
+        "http://127.0.0.1:5678/workflow/phase3-crm-write-diagnostic/executions/283"
+    )
     monkeypatch.setattr("app.api.operations.settings.n8n_editor_base_url", "http://localhost:5678/editor")
-    assert _execution_url("283") is None
+    assert _execution_url("phase3-crm-write-diagnostic", "283") is None
     monkeypatch.setattr("app.api.operations.settings.n8n_editor_base_url", "http://example.test:5678")
-    assert _execution_url("283") is None
+    assert _execution_url("phase3-crm-write-diagnostic", "283") is None
+    for unsafe_base in [
+        "https://localhost:5678",
+        "http://localhost:5679",
+        "http://user:password@localhost:5678",
+        "http://localhost:5678?query=yes",
+        "http://localhost:5678?",
+        "http://localhost:5678#fragment",
+        "http://localhost:5678#",
+        "http://localhost:5678/?",
+        "http://localhost:5678/#",
+        "http://localhost:5678\n",
+    ]:
+        monkeypatch.setattr("app.api.operations.settings.n8n_editor_base_url", unsafe_base)
+        assert _execution_url("phase3-crm-write-diagnostic", "283") is None
 
 
 def test_operations_incidents_keep_unlinked_history_and_gets_are_read_only(client, db):
@@ -198,7 +236,7 @@ def test_operations_incidents_keep_unlinked_history_and_gets_are_read_only(clien
     item = next(item for item in incidents["items"] if item["id"] == str(unlinked.id))
     assert item["id"] == str(unlinked.id)
     assert item["linked"] is False
-    assert item["execution_url"] == "http://localhost:5678/execution/515"
+    assert item["execution_url"] is None
     unknown_item = next(
         item for item in incidents["items"] if item["id"] == str(unknown_correlation.id)
     )

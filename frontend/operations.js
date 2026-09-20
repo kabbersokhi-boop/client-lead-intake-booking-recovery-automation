@@ -95,7 +95,7 @@
   }
 
   function validateIncident(entry) {
-    if (!isObject(entry) || !isUuid(entry.id) || !incidentStates.includes(entry.state) || !isTimestamp(entry.created_at) || !validOptionalTimestamp(entry.resolved_at) || typeof entry.error_class !== "string" || !validOptionalString(entry.execution_reference) || !validOptionalString(entry.execution_url) || !validOptionalString(entry.failed_node) || typeof entry.linked !== "boolean") throw invalidResponse();
+    if (!isObject(entry) || !isUuid(entry.id) || !incidentStates.includes(entry.state) || !isTimestamp(entry.created_at) || !validOptionalTimestamp(entry.resolved_at) || typeof entry.error_class !== "string" || !validOptionalString(entry.workflow_reference) || !validOptionalString(entry.execution_reference) || !validOptionalString(entry.execution_url) || !validOptionalString(entry.failed_node) || typeof entry.linked !== "boolean") throw invalidResponse();
     return entry;
   }
 
@@ -179,29 +179,30 @@
     element.textContent = `${prefix} ${errorText(error)}${staleSuffix(observedAt, label)}`;
   }
 
-  function safeExecutionUrl(reference, value) {
-    if (typeof reference !== "string" || !/^[0-9]+$/.test(reference) || typeof value !== "string") return null;
+  function safeExecutionUrl(workflowReference, executionReference, value) {
+    if (typeof workflowReference !== "string" || !/^[A-Za-z0-9_-]{1,160}$/.test(workflowReference) || typeof executionReference !== "string" || !/^[0-9]+$/.test(executionReference) || typeof value !== "string") return null;
     try {
       const url = new URL(value, window.location.origin);
-      if (url.protocol !== "http:" || !["localhost", "127.0.0.1"].includes(url.hostname) || url.port !== "5678" || url.username || url.password || url.search || url.hash || url.pathname !== `/execution/${reference}`) return null;
+      const path = `/workflow/${workflowReference}/executions/${executionReference}`;
+      if (url.protocol !== "http:" || !["localhost", "127.0.0.1"].includes(url.hostname) || url.port !== "5678" || url.username || url.password || url.pathname !== path || url.href !== `http://${url.host}${path}`) return null;
       return url.href;
     } catch {
       return null;
     }
   }
 
-  function execution(parent, reference, url) {
-    if (!reference) return;
-    const safeUrl = safeExecutionUrl(reference, url);
+  function execution(parent, workflowReference, executionReference, url) {
+    if (!executionReference) return;
+    const safeUrl = safeExecutionUrl(workflowReference, executionReference, url);
     const element = safeUrl ? document.createElement("a") : document.createElement("span");
     if (safeUrl) {
       element.href = safeUrl;
       element.target = "_blank";
       element.rel = "noopener noreferrer";
-      element.textContent = `n8n execution ${reference}`;
+      element.textContent = `n8n execution ${executionReference}`;
     } else {
       element.className = "identifier";
-      element.textContent = `Execution reference: ${reference}`;
+      element.textContent = `Execution reference: ${executionReference}`;
     }
     parent.append(element);
   }
@@ -365,7 +366,7 @@
     title.textContent = `${entry.state}: ${entry.error_class || "recorded error"}`;
     text.textContent = `${entry.linked ? "linked" : "unlinked"} · recorded ${formatTime(entry.created_at)}${entry.resolved_at ? ` · resolved ${formatTime(entry.resolved_at)}` : ""}${entry.failed_node ? ` · node ${entry.failed_node}` : ""}`;
     item.append(title, text);
-    execution(item, entry.execution_reference, entry.execution_url);
+    execution(item, entry.workflow_reference, entry.execution_reference, entry.execution_url);
     return item;
   }
 
@@ -386,7 +387,7 @@
     trace.textContent = "Inspect correlation lifecycle trace";
     root.append(trace);
     const source = document.createElement("p");
-    execution(source, data.source_execution_reference, data.source_execution_url);
+    execution(source, null, data.source_execution_reference, data.source_execution_url);
     if (source.childNodes.length) root.append(source);
     const attemptsHeading = document.createElement("h3");
     attemptsHeading.textContent = `Attempt history (${data.attempts.length})`;
@@ -404,7 +405,7 @@
       title.textContent = `Attempt ${attempt.attempt_number}: ${attempt.outcome}`;
       text.textContent = `Started ${formatTime(attempt.started_at)}; finished ${formatTime(attempt.finished_at)}; HTTP ${attempt.status_code ?? "not recorded"}; error ${attempt.error_class || "none"}; Retry-After ${attempt.retry_after_raw || "not recorded"}${attempt.retry_after_seconds !== null ? ` (${attempt.retry_after_seconds}s)` : ""}.`;
       item.append(title, text);
-      execution(item, attempt.execution_reference, attempt.execution_url);
+      execution(item, null, attempt.execution_reference, attempt.execution_url);
       root.append(item);
     });
     const incidentsHeading = document.createElement("h3");
