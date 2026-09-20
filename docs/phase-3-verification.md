@@ -6,9 +6,9 @@ Verified locally on 2026-09-20 IST from reviewed baseline `c11a6c13ab1885901aea8
 
 `scripts/verify_phase3.sh` was executed. It created a disposable PostgreSQL 16 container, discovered every configured test file, and removed that container on exit.
 
-- Python/PostgreSQL: 79 passed, 0 skipped.
+- Python/PostgreSQL: 89 passed, 0 skipped.
 - Browser helpers: 13 passed, 0 skipped.
-- Workflow code/structure: 32 passed, 0 skipped.
+- Workflow code/structure: 36 passed, 0 skipped.
 - Ruff, JSON parsing, shell syntax, Compose validation, `git diff --check`, and tracked-content secret scan passed.
 - Live n8n/NVIDIA/Mailpit checks are explicitly skipped by that deterministic script and were executed separately below.
 
@@ -106,3 +106,31 @@ This was a raw MIME and content inspection, not a claimed browser screenshot or 
 The deployed recovery workflow is active and the diagnostic workflow is inactive. Their nodes, connections, settings, finite timeouts, and `phase3-crm-recovery-error` links were compared with the sanitized exports. Executions `146`, `283`, `284`, and `515` remain retained. SQLite inspection included the WAL and SHM files so current execution rows were not mistaken for a stale main-file snapshot.
 
 All registered fault runs were disabled with delivery holds off at the end. No volume, prior execution, Mailpit message, lead, or audit history was deleted. The deterministic verifier's live skip is intentional; the local runtime checks above were executed separately.
+
+## 2026-09-20 canonical-payload and installed-envelope correction
+
+### Stored payload, repeated intake, and lost acknowledgement
+
+Live prepared job `110491c1-a835-40be-9b9e-5d630802b490` was stored with enriched AI state. A repeated authenticated durable intake used identical business fields but `fallback_invalid`, null enrichment, and `needs_review=true`. The request returned 201, but the response, stored job, and Lead retained the original enriched payload and summary; attempt count was one. This demonstrates that changed AI extraction alone does not replace prepared work.
+
+For the partial-success path, job `5ca59c16-3572-4e5e-bf4a-472d60793cde` started attempt `7147e6c5-d69e-467b-bb6d-66cb0059c5a8`, and the development CRM committed Lead `29c57e8d-4256-49fb-aba4-85df747b016c` with HTTP 201. Completion was deliberately omitted and the lease expired. Recovery execution `728` used the real lookup/validation branch, completed the job, and marked the sole attempt `reconciled`/200. It did not issue a second create attempt.
+
+The existing booked lead `3204d9d5-cffc-4e35-8f72-6221b264ec90` was replayed through durable intake with a later fallback fixture and no NVIDIA call. It returned 200/replayed with persisted `appointment_booked`, `fallback_invalid`, cancelled follow-up, one appointment, one follow-up, and the original confirmation timestamp `2026-09-19T20:40:49.942615Z`.
+
+### Real recovery Write-node 429
+
+Execution `703` first exposed the installed-envelope defect: n8n 2.39.8 retained `error.status=429` but omitted headers under ordinary continue-on-error behavior, so the durable attempt had no raw delay. This execution is retained as diagnostic correction evidence, not claimed as correct Retry-After behavior.
+
+After enabling the node's supported full-response/never-error options, execution `720` (`2026-09-20T02:22:49.521Z`–`02:22:49.666Z`) produced the definitive evidence:
+
+- `Write CRM Lead` received actual status 429, `retry-after: 20`, and `Controlled local CRM write quota exceeded.`
+- `Validate CRM Write Result` emitted status 429, retry delay 20, and `http_429`.
+- Attempt `802307c7-2595-4402-8166-292f0cc82c77` was the only counted call, started `02:22:49.621095Z`, finished `02:22:49.661014Z`, and scheduled due `02:23:09.661014Z`.
+- Fault run `4a948cc3-57c6-432d-b9c3-b0002d2f4fd9` remained active immediately before recovery with limit 1, fixed window 20 seconds, and window count 1.
+- Execution `722` ran `02:23:12.849Z`–`02:23:13.019Z`; attempt `c889a513-819c-4828-97c6-d8b1bc716bfb` started `02:23:12.936317Z`, completed `02:23:13.005322Z`, recorded 201, and created Lead `56b543b4-2c82-457b-b8ef-b0494e0231fb`.
+
+The test used a temporary PostgreSQL trigger scoped to only that synthetic job to expire the granted permit between permission and write, forcing the deployed Write node to exercise the real 429 boundary. The trigger was removed, the fault was disabled/reset, and final checks found zero active faults, zero delivery holds, and zero matching temporary triggers.
+
+### Final parity and retained evidence
+
+The deployed intake and recovery workflow nodes, connections, and settings exactly matched their sanitized exports after import. Intake, recovery, and error workflows were active; diagnostic remained inactive. Retained executions `146`, `283`, `284`, `515`, `583`, `720`, and `722` were present. The original batch remained 12/12 unique, and Skyler remained booked with one appointment and one cancelled follow-up. No screenshot or new Mailpit visual automation was performed in this correction; the previously documented raw MIME/manual layout check remains the honest email presentation evidence.

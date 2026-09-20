@@ -27,21 +27,49 @@ class RetryDecision:
     state: str
     due_at: datetime
     retry_after_seconds: int | None
+    retry_after_unrepresentable: bool = False
 
 
-def retry_after_seconds(value: str | None, now: datetime) -> int | None:
+MAX_RETRY_AFTER_SECONDS = (2**31) - 1
+
+
+@dataclass(frozen=True)
+class ParsedRetryAfter:
+    seconds: int | None
+    unrepresentable: bool = False
+
+
+def parse_retry_after(value: str | None, now: datetime) -> ParsedRetryAfter:
     if not value:
-        return None
+        return ParsedRetryAfter(None)
     value = value.strip()
-    if value.isdigit():
-        return int(value)
+    if value.isascii() and value.isdecimal():
+        try:
+            seconds = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return ParsedRetryAfter(None, unrepresentable=True)
+        if seconds > MAX_RETRY_AFTER_SECONDS:
+            return ParsedRetryAfter(None, unrepresentable=True)
+        return ParsedRetryAfter(seconds)
     try:
         parsed = parsedate_to_datetime(value)
     except (TypeError, ValueError, OverflowError):
-        return None
+        return ParsedRetryAfter(None)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
-    return max(0, math.ceil((parsed.astimezone(timezone.utc) - now).total_seconds()))
+    try:
+        seconds = max(
+            0, math.ceil((parsed.astimezone(timezone.utc) - now).total_seconds())
+        )
+    except (OverflowError, OSError, ValueError):
+        return ParsedRetryAfter(None, unrepresentable=True)
+    if seconds > MAX_RETRY_AFTER_SECONDS:
+        return ParsedRetryAfter(None, unrepresentable=True)
+    return ParsedRetryAfter(seconds)
+
+
+def retry_after_seconds(value: str | None, now: datetime) -> int | None:
+    return parse_retry_after(value, now).seconds
 
 
 def retry_decision(
@@ -50,20 +78,28 @@ def retry_decision(
     retry_after: str | None,
     now: datetime,
 ) -> RetryDecision:
-    parsed_retry = retry_after_seconds(retry_after, now)
+    parsed_retry = parse_retry_after(retry_after, now)
     if status_code in {400, 404, 409, 422}:
-        return RetryDecision("needs_review", now, parsed_retry)
+        return RetryDecision("needs_review", now, parsed_retry.seconds)
     if status_code in {401, 403}:
-        return RetryDecision("blocked", now, parsed_retry)
+        return RetryDecision("blocked", now, parsed_retry.seconds)
     if attempt_count >= settings.crm_recovery_max_attempts:
-        return RetryDecision("needs_review", now, parsed_retry)
+        return RetryDecision("needs_review", now, parsed_retry.seconds)
     if status_code == 429:
-        delay = parsed_retry if parsed_retry is not None else settings.crm_retry_fallback_seconds
+        if parsed_retry.unrepresentable:
+            return RetryDecision(
+                "needs_review", now, None, retry_after_unrepresentable=True
+            )
+        delay = (
+            parsed_retry.seconds
+            if parsed_retry.seconds is not None
+            else settings.crm_retry_fallback_seconds
+        )
     elif status_code is None or status_code >= 500:
         delay = settings.crm_retry_fallback_seconds * (2 ** max(0, attempt_count - 1))
     else:
-        return RetryDecision("needs_review", now, parsed_retry)
-    return RetryDecision("retry_wait", now + timedelta(seconds=delay), parsed_retry)
+        return RetryDecision("needs_review", now, parsed_retry.seconds)
+    return RetryDecision("retry_wait", now + timedelta(seconds=delay), parsed_retry.seconds)
 
 
 class RecoveryService:
@@ -94,6 +130,41 @@ class RecoveryService:
             is not None
         )
 
+    @staticmethod
+    def payload_for_job(job: CRMWriteJob) -> CRMLeadCreate:
+        try:
+            return CRMLeadCreate.model_validate(job.payload_json)
+        except ValueError as error:
+            raise RecoveryConflictError("Stored recovery payload is invalid") from error
+
+    @staticmethod
+    def _payload_for_existing_lead(lead: Lead) -> CRMLeadCreate:
+        enrichment = None
+        if lead.ai_status == "enriched":
+            enrichment = {
+                "service_type": lead.service_type,
+                "location": lead.location,
+                "preferred_time": lead.preferred_time,
+                "urgency": lead.urgency,
+                "summary": lead.summary,
+            }
+        return CRMLeadCreate.model_validate(
+            {
+                "submission_id": lead.submission_id,
+                "correlation_id": lead.correlation_id,
+                "received_at": lead.client_received_at,
+                "full_name": lead.full_name,
+                "email": lead.email,
+                "phone": lead.phone,
+                "original_message": lead.original_message,
+                "normalized_message": lead.normalized_message,
+                "enrichment": enrichment,
+                "ai_status": lead.ai_status,
+                "needs_review": lead.needs_review,
+                "provider_metadata": lead.provider_metadata,
+            }
+        )
+
     def admit(
         self,
         db: Session,
@@ -122,11 +193,12 @@ class RecoveryService:
             or lead.correlation_id != payload.correlation_id
         ):
             raise RecoveryConflictError
+        canonical_payload = self._payload_for_existing_lead(lead) if lead else payload
         job = CRMWriteJob(
             submission_id=payload.submission_id,
             correlation_id=payload.correlation_id,
             payload_fingerprint=fingerprint,
-            payload_json=payload.model_dump(mode="json", exclude_none=False),
+            payload_json=canonical_payload.model_dump(mode="json", exclude_none=False),
             state="completed" if lead else "pending",
             due_at=now,
             completed_lead_id=lead.id if lead else None,
@@ -481,7 +553,11 @@ class RecoveryService:
         job.state = decision.state
         job.due_at = decision.due_at
         job.last_error_class = error_class
-        job.last_error_message = safe_message
+        job.last_error_message = (
+            "Retry-After minimum cannot be represented safely; operator review is required."
+            if decision.retry_after_unrepresentable
+            else safe_message
+        )
         job.lease_token = None
         job.lease_owner = None
         job.lease_expires_at = None
@@ -528,7 +604,7 @@ class RecoveryService:
         now = now or datetime.now(timezone.utc)
         job = self._leased_job(db, job_id, lease_token)
         job.reconciliation_failure_count += 1
-        parsed_retry = retry_after_seconds(retry_after, now)
+        parsed_retry = parse_retry_after(retry_after, now)
         if status_code in {401, 403}:
             state = "blocked"
             due_at = now
@@ -537,13 +613,20 @@ class RecoveryService:
         ):
             state = "needs_review"
             due_at = now
+        elif status_code == 429 and parsed_retry.unrepresentable:
+            state = "needs_review"
+            due_at = now
+            safe_message = (
+                "Retry-After minimum cannot be represented safely; operator review is "
+                f"required. Raw value: {retry_after!r}"
+            )
         elif job.reconciliation_failure_count >= settings.crm_recovery_max_attempts:
             state = "needs_review"
             due_at = now
         elif status_code == 429:
             delay = (
-                parsed_retry
-                if parsed_retry is not None
+                parsed_retry.seconds
+                if parsed_retry.seconds is not None
                 else settings.crm_retry_fallback_seconds
             )
             state = "retry_wait"

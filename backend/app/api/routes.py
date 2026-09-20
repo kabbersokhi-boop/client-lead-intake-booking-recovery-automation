@@ -262,8 +262,14 @@ def durable_intake(
         raise HTTPException(
             status_code=409, detail="Recovery identity conflicts with stored data."
         ) from error
+    try:
+        canonical_payload = recovery_service.payload_for_job(job)
+    except RecoveryConflictError as error:
+        raise HTTPException(
+            status_code=409, detail="Stored recovery payload requires operator review."
+        ) from error
     if job.state == "completed" and job.completed_lead_id:
-        result = provider.create_lead(db, admission.payload)
+        result = provider.create_lead(db, canonical_payload)
         response.status_code = 200
         return _crm_response(result).model_dump(mode="json")
     fault_run = _fault_run_for(db, admission.payload.submission_id, lock=False)
@@ -299,8 +305,8 @@ def durable_intake(
             "recovery_state": job.state,
         }
     try:
-        _apply_fault_quota(db, admission.payload.submission_id, claimed.lease_token)
-        result = provider.create_lead(db, admission.payload)
+        _apply_fault_quota(db, canonical_payload.submission_id, claimed.lease_token)
+        result = provider.create_lead(db, canonical_payload)
     except HTTPException as error:
         retry_after = error.headers.get("Retry-After") if error.headers else None
         failed = recovery_service.fail(
@@ -340,14 +346,27 @@ def durable_intake(
         raise HTTPException(
             status_code=409, detail="Submission identity conflicts with CRM data."
         ) from error
-    recovery_service.complete(
-        db,
-        job.id,
-        claimed.lease_token,
-        result.lead.id,
-        attempt.id,
-        201 if result.created else 200,
-    )
+    try:
+        recovery_service.complete(
+            db,
+            job.id,
+            claimed.lease_token,
+            result.lead.id,
+            attempt.id,
+            201 if result.created else 200,
+        )
+    except StaleLeaseError:
+        db.rollback()
+        db.refresh(job)
+        response.status_code = 202
+        return {
+            "state": "received",
+            "intake_state": "queued",
+            "submission_id": str(job.submission_id),
+            "correlation_id": str(job.correlation_id),
+            "recovery_job_id": str(job.id),
+            "recovery_state": job.state,
+        }
     response.status_code = 201 if result.created else 200
     return _crm_response(result).model_dump(mode="json")
 

@@ -83,8 +83,31 @@ test("reconciliation binds the existing CRM result to the claimed identity", () 
   assert.equal(wrong.action, "defer_or_hold");
 });
 
+test("reconciliation accepts persisted replay AI while creation stays bound to stored payload", () => {
+  const reconciled = runCode(
+    "Validate Reconciliation",
+    crmRecord({ ai_status: "fallback_invalid" }),
+    { "Claim One Due CRM Job": claim },
+  )[0].json;
+  const replayedWrite = runCode(
+    "Validate CRM Write Result",
+    crmRecord({ ai_status: "fallback_invalid" }),
+    { "Claim One Due CRM Job": claim },
+  )[0].json;
+  const mismatchedCreation = runCode(
+    "Validate CRM Write Result",
+    crmRecord({ intake_state: "created", ai_status: "fallback_invalid" }),
+    { "Claim One Due CRM Job": claim },
+  )[0].json;
+
+  assert.equal(reconciled.action, "matched");
+  assert.equal(replayedWrite.succeeded, true);
+  assert.equal(mismatchedCreation.succeeded, false);
+});
+
 test("reconciliation distinguishes absence, credentials, throttling, and malformed success", () => {
   const cases = [
+    [{ statusCode: 404, headers: {}, body: { detail: "Lead not found" } }, "absent", 404],
     [{ error: { status: 404 } }, "absent", 404],
     [{ error: { status: 401 } }, "defer_or_hold", 401],
     [{ error: { status: 403 } }, "defer_or_hold", 403],
@@ -121,13 +144,44 @@ test("CRM write validation uses each claimed job identity and preserves Retry-Af
   )[0].json;
   const limited = runCode(
     "Validate CRM Write Result",
-    { error: { status: 429, headers: { "retry-after": "17" } } },
+    {
+      statusCode: 429,
+      headers: { "retry-after": "17" },
+      body: { detail: "Controlled local CRM write quota exceeded." },
+    },
     { "Claim One Due CRM Job": claim },
   )[0].json;
   assert.equal(success.succeeded, true);
   assert.equal(limited.succeeded, false);
   assert.equal(limited.status_code, 429);
   assert.equal(limited.retry_after, "17");
+});
+
+test("full-response write boundary validates success body and retained headers", () => {
+  const response = runCode(
+    "Validate CRM Write Result",
+    { statusCode: 201, headers: { "content-type": "application/json" }, body: crmRecord({ intake_state: "created" }) },
+    { "Claim One Due CRM Job": claim },
+  )[0].json;
+  assert.equal(response.succeeded, true);
+  assert.equal(response.status_code, 201);
+});
+
+test("explicit non-2xx status cannot be disguised by a success-shaped body", () => {
+  const written = runCode(
+    "Validate CRM Write Result",
+    { statusCode: 503, headers: {}, body: crmRecord({ intake_state: "created" }) },
+    { "Claim One Due CRM Job": claim },
+  )[0].json;
+  const reconciled = runCode(
+    "Validate Reconciliation",
+    { statusCode: 503, headers: {}, body: crmRecord() },
+    { "Claim One Due CRM Job": claim },
+  )[0].json;
+  assert.equal(written.succeeded, false);
+  assert.equal(written.status_code, 503);
+  assert.equal(reconciled.action, "defer_or_hold");
+  assert.equal(reconciled.status_code, 503);
 });
 
 test("write status normalization reaches exact retry and hold classifications", () => {
@@ -190,6 +244,12 @@ test("recovery control calls use finite timeouts within the lease budget", () =>
     assert.match(recoveryNodes[name].parameters.options.timeout, /3000/);
   }
   assert.match(recoveryNodes["Write CRM Lead"].parameters.options.timeout, /6000/);
+  for (const name of ["Reconcile by Submission Identity", "Write CRM Lead"]) {
+    const responseOptions = recoveryNodes[name].parameters.options.response.response;
+    assert.equal(responseOptions.fullResponse, true);
+    assert.equal(responseOptions.neverError, true);
+    assert.equal(responseOptions.responseFormat, "json");
+  }
   assert.doesNotMatch(JSON.stringify(recovery), /nvidia/i);
 });
 

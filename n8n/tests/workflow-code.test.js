@@ -165,6 +165,24 @@ test("intake replay trusts persisted AI state and permits a legacy missing follo
   assert.equal(replay.response_body.ai_status, "fallback_invalid");
 });
 
+test("intake creation acknowledges the canonical stored AI payload", () => {
+  const created = buildIntakeResult(
+    {
+      crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",
+      submission_id: lead.submission_id,
+      correlation_id: lead.correlation_id,
+      intake_state: "created",
+      ai_status: "enriched",
+      pipeline_stage: "new_lead",
+      follow_up_status: "pending",
+      follow_up_due_at: "2026-09-19T00:02:00Z",
+    },
+    { ai_status: "fallback_invalid" },
+  );
+  assert.equal(created.status_code, 201);
+  assert.equal(created.response_body.ai_status, "enriched");
+});
+
 test("intake replay rejects lifecycle combinations the browser rejects", () => {
   const base = {
     crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",

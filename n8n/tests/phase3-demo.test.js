@@ -90,6 +90,78 @@ assert controls[-1] == {
     "hold_delivery": False,
     "reset_window": True,
 }
+
+# Preparation restores only its own newly-created scope after a request failure.
+controls.clear()
+demo.fault_state = lambda *args, **kwargs: None
+demo.register = lambda *args, **kwargs: True
+demo.control = lambda *args, **kwargs: controls.append(kwargs) or {}
+demo.request = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("intake unavailable"))
+try:
+    demo.prepare(manifest)
+except OSError as error:
+    assert "intake unavailable" in str(error)
+else:
+    raise AssertionError("preparation request failure was accepted")
+assert controls[-1] == {
+    "active": False,
+    "hold_delivery": False,
+    "reset_window": True,
+}
+
+# A post-prepare state inspection failure restores the prior named scope.
+controls.clear()
+prior = {"active": True, "hold_delivery": False}
+demo.fault_state = lambda *args, **kwargs: prior
+demo.register = lambda *args, **kwargs: False
+demo.control = lambda *args, **kwargs: controls.append(kwargs) or {}
+demo.request = lambda *args, **kwargs: (202, {"intake_state": "queued"})
+demo.scoped_state = lambda *args, **kwargs: (_ for _ in ()).throw(
+    RuntimeError("state inspection unavailable")
+)
+try:
+    demo.prepare(manifest)
+except RuntimeError as error:
+    assert "state inspection unavailable" in str(error)
+else:
+    raise AssertionError("state inspection failure was accepted")
+assert controls[-1] == {"active": True, "hold_delivery": False}
+
+# Recovery exhaustion preserves the measured quota and reports exact operator actions.
+demo.time.sleep = lambda *_: None
+demo.request = lambda *args, **kwargs: (200, {})
+demo.scoped_state = lambda *args, **kwargs: {
+    "jobs": {"retry_wait": 1},
+    "expected": 1,
+    "matching_leads": 0,
+    "missing": [item["submission_id"]],
+    "duplicate_submission_ids": [],
+    "completed_job_lead_mismatches": [],
+    "identity_mismatches": [],
+}
+demo.fault_state = lambda *args, **kwargs: {
+    "active": True,
+    "hold_delivery": False,
+}
+try:
+    demo.recover(manifest)
+except RuntimeError as error:
+    message = str(error)
+    assert "active=True, hold_delivery=False" in message
+    assert "phase3_demo.py recover" in message
+    assert "phase3_demo.py disable" in message
+else:
+    raise AssertionError("recovery exhaustion was accepted")
+
+# Successful preparation intentionally retains its own active hold for the next command.
+controls.clear()
+demo.fault_state = lambda *args, **kwargs: None
+demo.register = lambda *args, **kwargs: True
+demo.control = lambda *args, **kwargs: controls.append(kwargs) or {}
+demo.request = lambda *args, **kwargs: (202, {"intake_state": "queued"})
+demo.scoped_state = lambda *args, **kwargs: {}
+demo.prepare(manifest)
+assert controls == [{"active": True, "hold_delivery": True, "reset_window": True}]
 `;
   const python = process.env.PYTHON || "python3";
   const result = spawnSync(python, ["-c", code], {

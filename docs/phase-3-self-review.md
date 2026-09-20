@@ -64,3 +64,35 @@ Mailpit contains newly generated multipart follow-up and booking messages. Raw M
 ## Residual risks and proof boundary
 
 The work proves bounded durable recovery against the local development CRM, not a vendor quota or historical outage. The database quota is one local fixed-window simulator. SMTP acceptance and the later database commit remain separate effects; uncertain email sends are not automatically replayed. Mailpit is not a production provider, and appointments do not reserve external capacity. The deterministic verifier intentionally skips live n8n, NVIDIA, and Mailpit and identifies those separate checks. Phase 4, Make, and GHL were not started.
+
+## Review of `d6fe8ccb40d29e953d1a515b9f6d798a56ad4719`
+
+This later correction pass treated C1–C4 as hypotheses and reviewed the complete affected route, recovery service, workflow Code nodes, CLI, tests, runtime definitions, and retained executions. It preserved the earlier attempt-ownership, job-first locks, one-row claim, fingerprint, lifecycle, and multipart-email corrections.
+
+### C1 — reproduced: immediate intake did not use the stored prepared payload
+
+`RecoveryService.admit` correctly reused an existing matching job, but `durable_intake` passed the newest request payload to the provider. The fix validates `job.payload_json` back into `CRMLeadCreate` and uses it for every immediate creation/retry. When a Lead predates its first recovery job, admission reconstructs the canonical payload from the persisted Lead rather than a later NVIDIA result. Created results must match the stored AI state; replay/reconciliation may use a different valid persisted AI state only after submission ID, correlation ID, fingerprint, typed lifecycle, and follow-up validation.
+
+The live prepared job `110491c1-a835-40be-9b9e-5d630802b490` was admitted as enriched, then repeated with the same business identity and a valid fallback AI result. It completed with one attempt; job, response, and Lead remained enriched with the original prepared summary. Lost-ack job `5ca59c16-3572-4e5e-bf4a-472d60793cde` committed Lead `29c57e8d-4256-49fb-aba4-85df747b016c`, deliberately omitted completion, expired its lease, and was reconciled by execution `728`. Its only attempt `7147e6c5-d69e-467b-bb6d-66cb0059c5a8` became `reconciled`; no second write occurred. A no-AI replay of booked Skyler returned persisted `appointment_booked`/`fallback_invalid`, one cancelled follow-up, one appointment, and the unchanged confirmation timestamp.
+
+### C2 — reproduced: Retry-After parsing could crash settlement
+
+Unicode `²` passed `isdigit()` but failed `int()`, and an oversized ASCII integer overflowed the due-time calculation. Parsing now accepts only ASCII decimal seconds, handles HTTP dates, and checks both PostgreSQL integer and Python datetime representability. Malformed values use the documented fallback without raising. An unrepresentable valid 429 minimum moves work to `needs_review`; write attempts retain `retry_after_raw`, and reconciliation holds escaped raw evidence in the safe job message. HTTP meaning takes precedence when the header is irrelevant: 401/403 still block even if they carry an oversized header. Tests cover normal seconds, 7200 seconds, HTTP date, missing/malformed, `²`, the 32-bit boundary, huge numeric values, year-9999 dates, write settlement, and reconciliation settlement.
+
+### C3 — reproduced and closed against installed n8n
+
+No retained execution proved a real 429 at the recovery workflow's own Write node. The first new setup was pre-empted by the minute scheduler and produced a normal 201, so it is not claimed as rejection evidence. Execution `703` then proved the Write node received 429, but inspection of the installed 2.39.8 envelope showed only `error.status`; response headers were absent, and the attempt used the generic fallback. That falsified the prior assumption that the configured parser could always see headers.
+
+The supported HTTP Request options `Never Error` and `Include Response Headers and Status` now create an explicit `{body, headers, statusCode}` boundary for lookup and write, while Code nodes remain compatible with tested legacy error shapes. A subsequent setup (`717`/`718`) retained the header, but a harness query error disabled the fault before recovery; it is not claimed as same-quota evidence. The definitive run is execution `720`: `Write CRM Lead` stored status 429, `retry-after: 20`, and the real controlled detail; validation emitted `http_429`; attempt `802307c7-2595-4402-8166-292f0cc82c77` recorded one increment and due time exactly 20 seconds after settlement. Immediately before recovery the same run `4a948cc3-57c6-432d-b9c3-b0002d2f4fd9` was active with limit 1/window 20/count 1. Execution `722` created the Lead on attempt 2 after the window elapsed. No NVIDIA call was made; the stored payload was reused.
+
+### C4 — reproduced in part: failure disposition was incomplete
+
+`recover` raised without cleanup or an explicit named-scope disposition, and state inspection after successful mutation could occur outside protected sections. Preparation and diagnostic failures now restore only the invocation's newly created or prior named scope where possible. Cleanup failure reports both the original and cleanup errors. Recovery failure/exhaustion preserves evidence, inspects and prints the exact scoped state, and gives exact resume/disable commands rather than silently destroying the measured quota. Tests cover request failure, post-mutation inspection failure, cleanup ownership, recovery exhaustion, and intentional successful preparation that retains its hold.
+
+### Additional findings from the second independent pass
+
+1. **Lease expiry after CRM commit returned 500.** If the lead committed just before settlement lost its lease, immediate intake raised despite durable recoverability. It now returns truthful 202 queued without a CRM ID; the regression expires the lease after commit and completes through lookup reconciliation.
+2. **Explicit non-2xx could be hidden by a success-shaped body.** After enabling full responses, typed validation initially checked the body but not the explicit status. Both reconciliation and write validation now require a missing legacy status or an actual 2xx. A 503 carrying a valid-looking CRM body cannot complete work.
+3. **Unrepresentable Retry-After initially overrode credential semantics.** The first parser correction evaluated representability before status class. It now applies the special hold only to 429; 401/403 remain blocked and business failures keep their meaning.
+
+No new defect was found in attempt-budget counting, stale callback rejection, quota lock order, permit ownership, duplicate admission, changed business-data conflicts, incident deduplication, booking/follow-up preservation, operator authentication, email MIME/idempotency, or diagnostic activation. Focused adversarial tests and the complete verifier cover those claims within this repository's synthetic boundary.

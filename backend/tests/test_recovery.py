@@ -13,9 +13,11 @@ from app.models import CRMFaultRun, CRMWriteAttempt, CRMWriteJob, Lead, Recovery
 from app.schemas.lead import CRMLeadCreate
 from app.services.crm_service import DevelopmentCRMService
 from app.services.recovery_service import (
+    MAX_RETRY_AFTER_SECONDS,
     RecoveryConflictError,
     RecoveryService,
     StaleLeaseError,
+    parse_retry_after,
     retry_after_seconds,
     retry_decision,
 )
@@ -37,6 +39,30 @@ def test_retry_after_supports_seconds_http_date_invalid_missing_and_long_delay()
     )
 
 
+@pytest.mark.parametrize("value", ["99999999999999999999", "²"])
+def test_unrepresentable_or_nonnormal_numeric_retry_after_never_crashes(value):
+    now = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+    parsed = parse_retry_after(value, now)
+    if value.isascii():
+        assert parsed.unrepresentable is True
+        decision = retry_decision(429, 1, value, now)
+        assert decision.state == "needs_review"
+        assert decision.due_at == now
+    else:
+        assert parsed.unrepresentable is False
+        assert retry_decision(429, 1, value, now).due_at == now + timedelta(
+            seconds=settings.crm_retry_fallback_seconds
+        )
+
+
+def test_retry_after_database_integer_boundary_is_safe():
+    now = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+    assert parse_retry_after(str(MAX_RETRY_AFTER_SECONDS), now).seconds == (
+        MAX_RETRY_AFTER_SECONDS
+    )
+    assert parse_retry_after(str(MAX_RETRY_AFTER_SECONDS + 1), now).unrepresentable is True
+
+
 def test_retry_classification_and_exact_total_attempt_budget():
     now = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
     assert retry_decision(400, 1, None, now).state == "needs_review"
@@ -48,6 +74,7 @@ def test_retry_classification_and_exact_total_attempt_budget():
     assert retry_decision(429, settings.crm_recovery_max_attempts, "10", now).state == (
         "needs_review"
     )
+    assert retry_decision(401, 1, "99999999999999999999", now).state == "blocked"
 
 
 def test_durable_admission_uniqueness_conflict_and_completed_reuse(db):
@@ -76,6 +103,77 @@ def test_durable_admission_uniqueness_conflict_and_completed_reuse(db):
     completed, _ = service.admit(db, other)
     assert completed.state == "completed"
     assert completed.completed_lead_id == lead.id
+
+
+def test_durable_intake_reuses_first_prepared_payload_when_later_ai_changes(client, db):
+    prepared = validated_payload()
+    admitted = client.post(
+        "/api/recovery/jobs", json={"payload": prepared.model_dump(mode="json")}
+    )
+    assert admitted.status_code == 201
+
+    later_fallback = prepared.model_copy(
+        update={
+            "enrichment": None,
+            "ai_status": "fallback_invalid",
+            "needs_review": True,
+            "provider_metadata": None,
+        }
+    )
+    delivered = client.post(
+        "/api/recovery/intake",
+        json={"payload": later_fallback.model_dump(mode="json")},
+    )
+
+    assert delivered.status_code == 201
+    assert delivered.json()["ai_status"] == "enriched"
+    job = db.scalar(select(CRMWriteJob).where(CRMWriteJob.submission_id == prepared.submission_id))
+    lead = db.scalar(select(Lead).where(Lead.submission_id == prepared.submission_id))
+    assert job.payload_json["ai_status"] == "enriched"
+    assert lead.ai_status == "enriched"
+    assert lead.service_type == prepared.enrichment.service_type
+    assert job.attempt_count == 1
+
+
+def test_durable_intake_reuses_prepared_enrichment_details(client, db):
+    prepared = validated_payload()
+    client.post("/api/recovery/jobs", json={"payload": prepared.model_dump(mode="json")})
+    changed_enrichment = prepared.enrichment.model_copy(
+        update={"summary": "A later model returned different extraction details."}
+    )
+    later = prepared.model_copy(update={"enrichment": changed_enrichment})
+
+    delivered = client.post(
+        "/api/recovery/intake", json={"payload": later.model_dump(mode="json")}
+    )
+
+    assert delivered.status_code == 201
+    lead = db.scalar(select(Lead).where(Lead.submission_id == prepared.submission_id))
+    assert lead.summary == prepared.enrichment.summary
+
+
+def test_completed_admission_replays_persisted_ai_not_later_ai(client, db):
+    prepared = validated_payload()
+    lead = DevelopmentCRMService().create_lead(db, prepared).lead
+    later_fallback = prepared.model_copy(
+        update={
+            "enrichment": None,
+            "ai_status": "fallback_invalid",
+            "needs_review": True,
+            "provider_metadata": None,
+        }
+    )
+
+    replay = client.post(
+        "/api/recovery/intake",
+        json={"payload": later_fallback.model_dump(mode="json")},
+    )
+
+    assert replay.status_code == 200
+    assert replay.json()["crm_lead_id"] == str(lead.id)
+    assert replay.json()["ai_status"] == "enriched"
+    job = db.scalar(select(CRMWriteJob).where(CRMWriteJob.submission_id == prepared.submission_id))
+    assert job.payload_json["ai_status"] == "enriched"
 
 
 def test_expired_lease_is_reclaimed_and_stale_worker_cannot_complete(db):
@@ -140,6 +238,53 @@ def test_attempt_history_retry_and_exhaustion_are_not_reset(db):
     assert db.scalar(select(func.count()).select_from(CRMWriteAttempt)) == 5
 
 
+def test_unrepresentable_retry_after_settles_attempt_for_review(db):
+    service = RecoveryService()
+    job, _ = service.admit(db, validated_payload())
+    claimed = service.claim(db, "overflow-test")
+    attempt = service.start_attempt(db, job.id, claimed.lease_token)
+
+    settled = service.fail(
+        db,
+        job.id,
+        claimed.lease_token,
+        attempt.id,
+        429,
+        "http_429",
+        "CRM write was not verified.",
+        "99999999999999999999",
+    )
+
+    db.refresh(attempt)
+    assert settled.state == "needs_review"
+    assert settled.lease_token is None
+    assert "cannot be represented safely" in settled.last_error_message
+    assert attempt.finished_at is not None
+    assert attempt.retry_after_raw == "99999999999999999999"
+    assert attempt.retry_after_seconds is None
+
+
+def test_unrepresentable_reconciliation_retry_after_releases_lease_for_review(db):
+    service = RecoveryService()
+    job, _ = service.admit(db, validated_payload())
+    claimed = service.claim(db, "lookup-overflow-test")
+
+    settled = service.fail_reconciliation(
+        db,
+        job.id,
+        claimed.lease_token,
+        429,
+        "reconciliation_http_429",
+        "CRM lookup was not verified.",
+        "Fri, 31 Dec 9999 23:59:59 GMT",
+    )
+
+    assert settled.state == "needs_review"
+    assert settled.lease_token is None
+    assert "cannot be represented safely" in settled.last_error_message
+    assert "Fri, 31 Dec 9999 23:59:59 GMT" in settled.last_error_message
+
+
 def test_committed_write_with_lost_ack_is_reconciled_without_duplicate(db):
     service = RecoveryService()
     request = validated_payload()
@@ -150,6 +295,76 @@ def test_committed_write_with_lost_ack_is_reconciled_without_duplicate(db):
     assert completed.completed_lead_id == lead.id
     assert db.scalar(select(func.count()).select_from(Lead)) == 1
     assert db.scalar(select(func.count()).select_from(CRMWriteAttempt)) == 0
+
+
+def test_lost_ack_lookup_returns_persisted_canonical_payload_for_workflow(client, db):
+    service = RecoveryService()
+    prepared = validated_payload()
+    job, _ = service.admit(db, prepared)
+    claimed = service.claim(db, "lost-ack-writer")
+    attempt = service.start_attempt(db, job.id, claimed.lease_token)
+    lead = DevelopmentCRMService().create_lead(
+        db, service.payload_for_job(claimed)
+    ).lead
+    claimed.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.commit()
+
+    reclaimed = service.claim(db, "reconciliation-worker")
+    lookup = client.get(f"/api/crm/leads/by-submission/{prepared.submission_id}")
+
+    assert lookup.status_code == 200
+    assert lookup.json()["intake_state"] == "replayed"
+    assert lookup.json()["ai_status"] == job.payload_json["ai_status"]
+    assert lookup.json()["submission_fingerprint"] == job.payload_fingerprint
+    completed = service.complete(db, job.id, reclaimed.lease_token, lead.id)
+    db.refresh(attempt)
+    assert completed.state == "completed"
+    assert attempt.outcome == "reconciled"
+    assert db.scalar(select(func.count()).select_from(Lead)) == 1
+
+
+def test_intake_commit_with_expired_settlement_lease_returns_queued_and_reconciles(
+    client, db, monkeypatch
+):
+    service = RecoveryService()
+    prepared = validated_payload()
+    original_complete = service.complete
+
+    def expire_before_complete(
+        session,
+        job_id,
+        lease_token,
+        lead_id,
+        attempt_id=None,
+        status_code=200,
+        now=None,
+    ):
+        job = session.get(CRMWriteJob, job_id)
+        job.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        session.commit()
+        raise StaleLeaseError
+
+    monkeypatch.setattr(
+        "app.api.routes.recovery_service.complete", expire_before_complete
+    )
+    response = client.post(
+        "/api/recovery/intake", json={"payload": prepared.model_dump(mode="json")}
+    )
+
+    assert response.status_code == 202
+    assert response.json()["intake_state"] == "queued"
+    assert "crm_lead_id" not in response.json()
+    assert db.scalar(select(func.count()).select_from(Lead)) == 1
+    job = db.scalar(select(CRMWriteJob).where(CRMWriteJob.submission_id == prepared.submission_id))
+    reclaimed = service.claim(db, "post-commit-reconciler")
+    lookup = client.get(f"/api/crm/leads/by-submission/{prepared.submission_id}")
+    assert lookup.status_code == 200
+    monkeypatch.setattr("app.api.routes.recovery_service.complete", original_complete)
+    completed = original_complete(
+        db, job.id, reclaimed.lease_token, uuid.UUID(lookup.json()["crm_lead_id"])
+    )
+    assert completed.state == "completed"
+    assert db.scalar(select(func.count()).select_from(Lead)) == 1
 
 
 def test_admission_and_completion_verify_business_identity(db):

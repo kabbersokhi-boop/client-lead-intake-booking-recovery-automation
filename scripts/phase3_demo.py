@@ -165,6 +165,29 @@ def scoped_state(manifest):
     }
 
 
+def restore_scoped_fault(manifest, prior, created):
+    if created or prior is None:
+        return control(
+            manifest, active=False, hold_delivery=False, reset_window=True
+        )
+    return control(
+        manifest,
+        active=prior["active"],
+        hold_delivery=prior["hold_delivery"],
+    )
+
+
+def raise_after_restore(manifest, prior, created, original_error):
+    try:
+        restore_scoped_fault(manifest, prior, created)
+    except Exception as cleanup_error:
+        raise RuntimeError(
+            f"{original_error}; scoped cleanup also failed ({cleanup_error}). "
+            f"The named fault scope may remain active; run: {Path(__file__).name} disable"
+        ) from original_error
+    raise original_error
+
+
 def prepare(manifest):
     prior = fault_state(manifest, allow_missing=True)
     created = register(manifest)
@@ -177,17 +200,9 @@ def prepare(manifest):
                 raise RuntimeError(
                     f"Expected queued intake, received HTTP {status_code}: {result}"
                 )
-    except Exception:
-        if created:
-            control(manifest, active=False, hold_delivery=False, reset_window=True)
-        elif prior is not None:
-            control(
-                manifest,
-                active=prior["active"],
-                hold_delivery=prior["hold_delivery"],
-            )
-        raise
-    state = scoped_state(manifest)
+        state = scoped_state(manifest)
+    except Exception as error:
+        raise_after_restore(manifest, prior, created, error)
     state["operator_notice"] = (
         "This scoped fault remains ACTIVE with delivery HELD for the next demo command."
     )
@@ -195,8 +210,9 @@ def prepare(manifest):
 
 
 def before(manifest):
-    control(manifest, active=True, hold_delivery=False, reset_window=True)
+    prior = fault_state(manifest, allow_missing=True)
     try:
+        control(manifest, active=True, hold_delivery=False, reset_window=True)
         identifiers = {item["submission_id"] for item in manifest["enquiries"]}
         jobs = request(f"{BACKEND_URL}/api/recovery/jobs", authenticated=True)[1]
         leads = request(f"{BACKEND_URL}/api/leads")[1]
@@ -207,42 +223,58 @@ def before(manifest):
         status_code, result = request(
             DIAGNOSTIC_URL, method="POST", body={"jobs": payloads}, allow_error=True
         )
-    except Exception:
-        control(manifest, active=False, hold_delivery=False, reset_window=True)
-        raise
-    state = scoped_state(manifest)
-    saw_429 = any(
-        attempt["status_code"] == 429 and attempt["outcome"] == "failed"
-        for attempt in state["actual_write_attempts"]
-    )
-    partial_completion = 0 < state["matching_leads"] < state["expected"]
-    if not saw_429 or not partial_completion:
-        control(manifest, active=False, hold_delivery=False, reset_window=True)
-        raise RuntimeError(
-            "Diagnostic did not produce both partial CRM completion and a real 429 attempt"
+        state = scoped_state(manifest)
+        saw_429 = any(
+            attempt["status_code"] == 429 and attempt["outcome"] == "failed"
+            for attempt in state["actual_write_attempts"]
         )
+        partial_completion = 0 < state["matching_leads"] < state["expected"]
+        if not saw_429 or not partial_completion:
+            raise RuntimeError(
+                "Diagnostic did not produce both partial CRM completion and a real 429 attempt"
+            )
+    except Exception as error:
+        raise_after_restore(manifest, prior, False, error)
     print(json.dumps({"diagnostic_http_status": status_code, "body": result}, indent=2))
     print(json.dumps(state, indent=2))
     print("Scoped quota remains active for the measured recovery command.")
 
 
 def recover(manifest):
-    for _ in range(30):
-        request(RECOVERY_URL, method="POST", body={}, allow_error=True)
-        state = scoped_state(manifest)
-        complete = (
-            state["jobs"].get("completed") == state["expected"]
-            and state["matching_leads"] == state["expected"]
-            and not state["missing"]
-            and not state["duplicate_submission_ids"]
-            and not state["completed_job_lead_mismatches"]
-            and not state["identity_mismatches"]
-        )
-        if complete:
-            print(json.dumps(state, indent=2))
-            return
-        time.sleep(1)
-    raise RuntimeError("Recovery did not complete the scoped batch within 30 dispatches")
+    try:
+        for _ in range(30):
+            request(RECOVERY_URL, method="POST", body={}, allow_error=True)
+            state = scoped_state(manifest)
+            complete = (
+                state["jobs"].get("completed") == state["expected"]
+                and state["matching_leads"] == state["expected"]
+                and not state["missing"]
+                and not state["duplicate_submission_ids"]
+                and not state["completed_job_lead_mismatches"]
+                and not state["identity_mismatches"]
+            )
+            if complete:
+                print(json.dumps(state, indent=2))
+                return
+            time.sleep(1)
+        raise RuntimeError("Recovery did not complete the scoped batch within 30 dispatches")
+    except Exception as error:
+        try:
+            current = fault_state(manifest, allow_missing=True)
+            disposition = (
+                "not registered"
+                if current is None
+                else (
+                    f"active={current['active']}, hold_delivery={current['hold_delivery']}"
+                )
+            )
+        except Exception as inspection_error:
+            disposition = f"unknown because state inspection failed ({inspection_error})"
+        raise RuntimeError(
+            f"{error}; scoped fault disposition is {disposition}. "
+            f"Resume with '{Path(__file__).name} recover' or restore safety with "
+            f"'{Path(__file__).name} disable'."
+        ) from error
 
 
 def main():
