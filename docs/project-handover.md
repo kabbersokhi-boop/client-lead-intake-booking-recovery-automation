@@ -7,6 +7,10 @@ Future phases must update this document before their final commit so the reposit
 ## Current checkpoint
 
 - Review date: 2026-09-21.
+- Phase 7A presentation-hardening implementation SHA: `235d1f55156820a1aa0a0b7416bf6a44a3533e4f`.
+- Phase 7A deterministic verification: 98 Python tests, 28 frontend/helper tests, and 43
+  workflow tests (169 total), plus Ruff, JavaScript/JSON/shell syntax, Compose validation,
+  `git diff --check`, and tracked-content secret scanning. Exact-SHA CI is required after push.
 - Approved Phase 5 implementation SHA: `69c2a9e6c65f939ecd59317d51f5a14d2afa5db3`.
 - Phase 5 implementation exact-SHA CI: run `35535162885`, job `106142768361`, successful.
 - Phase 5 CI counts: 98 backend/Python/PostgreSQL tests, 28 frontend/helper tests, and
