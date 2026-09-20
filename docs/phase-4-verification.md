@@ -25,6 +25,7 @@ The disposable-fixture suite covers zero-state aggregates, multiple attempts per
 ## Final deterministic and runtime evidence
 
 - `./scripts/verify_phase3.sh` passed on the final worktree: 92 Python/SQLite/PostgreSQL tests, 15 browser-helper/static frontend tests, and 36 workflow-code/structure tests; lint, Compose config, JSON/shell syntax, diff check, and tracked-content secret scan also passed.
+- GitHub Actions `Backend CI` run `35514393356` passed for implementation SHA `5fc70c6f41643de5620b0974dfcc226e2665c87d`; its job completed lint, Python tests, browser tests, and workflow tests. The runner emitted only upstream Node 20 and future Ubuntu image deprecation notices.
 - Rebuilt only the existing Compose backend, then received HTTP 200 from `/operations.html`, `/api/operations/summary`, and a retained job detail. The summary observed 36 completed jobs and 2 open incidents at `2026-09-20T13:43:17Z`.
 - API job `e3f7d48d-64c3-4bd0-8d44-6d9d2d2c4e69`, correlation `236169e3-7c3e-4243-8a94-251ac4f9869a`, showed a retained failed HTTP 429 attempt in n8n execution `283`, then completed attempt `292`, a resolved linked incident, and a verified contacted Lead. Read-only PostgreSQL queries independently returned the same completed/2-attempt/resolved chain.
 - No Phase 3 fault scope, recovery worker, n8n workflow, NVIDIA request, SMTP send, or Mailpit message was triggered for this phase.
