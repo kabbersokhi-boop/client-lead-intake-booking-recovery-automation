@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from test_leads import payload
 
+from app.api.operations import operations_job_detail, operations_jobs, operations_summary
 from app.api.routes import _apply_fault_quota, recovery_quota_permission
 from app.models import CRMFaultRun, CRMWriteJob
 from app.schemas.lead import CRMLeadCreate
@@ -104,6 +105,39 @@ def test_workers_claim_distinct_jobs_without_locking_the_backlog(postgres_sessio
     with ThreadPoolExecutor(max_workers=4) as executor:
         claimed = list(executor.map(claim, range(4)))
     assert len(set(claimed)) == 4
+
+
+def test_operations_read_projection_uses_postgres_without_mutating_jobs(postgres_sessions):
+    submission_id = uuid.uuid4()
+    correlation_id = uuid.uuid4()
+    with postgres_sessions() as db:
+        job, _ = RecoveryService().admit(
+            db,
+            CRMLeadCreate.model_validate(
+                payload(submission_id=str(submission_id), correlation_id=str(correlation_id))
+            ),
+        )
+        job.payload_json["phase4_secret_canary"] = "not-for-browser"
+        job.lease_token = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        db.commit()
+        before = (job.state, job.attempt_count, job.updated_at)
+
+        summary = operations_summary(db)
+        page = operations_jobs(
+            state="pending", lookup_kind="submission_id", lookup_id=submission_id,
+            page=1, page_size=25, db=db,
+        )
+        detail = operations_job_detail(job.id, db)
+        db.refresh(job)
+
+    assert summary.job_counts.pending >= 1
+    assert page.total == 1
+    assert page.items[0].id == job.id
+    assert detail.completed_lead is None
+    assert detail.attempts == []
+    assert "phase4_secret_canary" not in detail.model_dump_json()
+    assert "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" not in detail.model_dump_json()
+    assert (job.state, job.attempt_count, job.updated_at) == before
 
 
 def test_quota_permission_and_direct_write_path_use_one_lock_order(postgres_sessions):

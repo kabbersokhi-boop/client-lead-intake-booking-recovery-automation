@@ -2,7 +2,7 @@
 
 A fresh technical-interview capability demonstration for an end-to-end enquiry and booking lifecycle. All example data is synthetic. This is not a production client deployment and does not use a fictional product or client brand.
 
-> Current scope: Phase 1 intake, Phase 2 lifecycle/booking, and Phase 3 bounded CRM-write recovery. Make, WhatsApp, real calendar/email providers, and a vendor CRM integration are not implemented. The CRM boundary remains an explicit development adapter.
+> Current scope: Phase 1 intake, Phase 2 lifecycle/booking, Phase 3 bounded CRM-write recovery, and Phase 4 read-only operations. Make, WhatsApp, real calendar/email providers, and a vendor CRM integration are not implemented. The CRM boundary remains an explicit development adapter.
 
 ## Architecture
 
@@ -100,12 +100,15 @@ See [docs/phase-1-verification.md](docs/phase-1-verification.md) for the approve
 
 Phase 3 evidence and operations are in [docs/phase-3-verification.md](docs/phase-3-verification.md), [docs/phase-3-failed-run-postmortem.md](docs/phase-3-failed-run-postmortem.md), [docs/phase-3-runbook.md](docs/phase-3-runbook.md), and [docs/phase-3-self-review.md](docs/phase-3-self-review.md). Run `scripts/verify_phase3.sh` for deterministic verification and `scripts/phase3_demo.py --help` for authenticated local demo controls.
 
+Open [http://localhost:18000/operations.html](http://localhost:18000/operations.html) for the local, synthetic, read-only operations view. Refresh job-state counts, filter or paste an exact job/submission/correlation UUID, select a job, inspect persisted attempts and incidents, then follow its correlation trace or safely constructed local n8n execution link. The page never sends the adapter key to the browser and cannot claim, retry, requeue, resolve, send, or mutate records. Phase 4 verification and self-review are in [docs/phase-4-verification.md](docs/phase-4-verification.md) and [docs/phase-4-self-review.md](docs/phase-4-self-review.md).
+
 ## Security
 
 - `.env` is ignored and `.env.example` contains placeholders only.
 - The n8n export is sanitized: it contains no keys, credential IDs, account identifiers, or private endpoints.
 - The browser temporarily uses `sessionStorage` only for an ambiguous pending submission so it can retry with the same identity; it clears that data only after verified success. It stores no secrets.
 - Read endpoints are verification-only and Compose keeps them loopback-only. CORS is not used as authentication; the n8n-to-CRM write route uses the shared adapter credential.
+- `/operations.html` uses narrow same-origin browser-safe read projections only. Its local n8n execution links require a numeric reference and configured loopback editor base; arbitrary stored values remain copyable text.
 - Audit metadata intentionally stores only trace and operational state; it never stores secrets.
 - Mailpit data is ephemeral local runtime state and is not committed.
 - Lifecycle row locks prevent ordinary concurrent duplicate sends, but SMTP acceptance and the subsequent PostgreSQL commit are separate effects. A crash or lost acknowledgement between them is not an exactly-once guarantee; uncertain-delivery recovery remains outside Phase 2.

@@ -403,3 +403,9 @@ traceForm.addEventListener("submit", async (event) => {
     technicalDetails.hidden = true;
   }
 });
+
+const traceFromOperations = new URLSearchParams(window.location.search).get("trace");
+if (traceFromOperations) {
+  traceId.value = traceFromOperations;
+  traceSummary.textContent = "Correlation ID supplied by Automation Operations. Load the trace when ready.";
+}

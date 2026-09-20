@@ -11,6 +11,7 @@
 | PostgreSQL | Stores lead, follow-up, appointment, source/server timestamp, idempotency, and audit state by correlation ID. |
 | CRM recovery job | Stores the validated payload before delivery, bounded lease, attempt history, safe errors, due time, and final CRM identity independently of a Lead row. |
 | Mailpit | Accepts local development SMTP messages and exposes them on a loopback web UI. It is not an external email provider. |
+| Operations read projection | Exposes allowlisted summaries, paged jobs, job detail, and incidents from the same local PostgreSQL records. It does not invoke recovery actions or external services. |
 
 ## Demonstration lead source
 
@@ -57,3 +58,9 @@ The disabled-by-default fixed-window simulator affects only registered synthetic
 ## Development boundary
 
 The working integration remains `DevelopmentCRMProvider` plus small lifecycle and CRM-write recovery services. No vendor CRM, real calendar, external email provider, general job platform, or Phase 4 integration is configured.
+
+## Read-only operations view
+
+`/operations.html` is a local demonstration page over `/api/operations/*`, separate from protected recovery-worker contracts. It reports current durable job-state counts at an explicitly labelled observation time, pages jobs by `created_at DESC, id DESC`, and shows safe attempt/incident history for a selected job. A due time is eligible retry information only for `retry_wait`; it is not evidence of an attempted failure. A completed job may be an ordinary intake rather than a recovery.
+
+Browser projections omit payloads, lease/quota tokens, credentials, provider response bodies, and arbitrary audit metadata. GET handlers issue ordinary reads: they do not lock, claim, expire, retry, resolve, commit, or call n8n, NVIDIA, SMTP, or the CRM write boundary. Numeric execution references may link to the configured loopback n8n editor route; all other values remain text. This is a local synthetic-data boundary, not production authentication or health monitoring.

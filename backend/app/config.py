@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./lead_intake.db"
     n8n_webhook_url: str = "http://localhost:5678/webhook/lead-intake"
     n8n_booking_webhook_url: str = "http://localhost:5678/webhook/appointment-booking"
+    n8n_editor_base_url: str = "http://localhost:5678"
     n8n_request_timeout_ms: int = 30_000
     crm_adapter_api_key: SecretStr | None = None
     follow_up_delay_seconds: int = 120
