@@ -23,3 +23,9 @@ Recovery executions `289`–`297`, including write attempts `292`/`294`, reconci
 ## Residual risks
 
 SMTP acceptance and the later database commit remain separate effects; this queue does not replay uncertain mail. The simulator represents one local fixed-window quota, not a real CRM vendor contract. Operator review remains required for business failures, credentials, malformed acknowledgements that reconciliation cannot resolve, and exhausted work.
+
+## Correction-pass addendum
+
+Review of commit `6359d7aea8c59dfbe9c2353820338358438baa35` found that the normal quota boundary could independently mutate attempt state after a caller had already opened an attempt. The retained historical execution `283` remains valid evidence of a real 429 and automatic error workflow `284`, but the bookkeeping ownership was unsafe for ordinary durable intake.
+
+Attempt creation and settlement are now owned by one exact lease/attempt pair; the quota layer only accepts or rejects the HTTP call. A corrected at-write 429 created one attempt and one increment, retained `Retry-After: 69`, and recovered in execution `515` only after that minimum. The pass also corrected HTTP-envelope normalization, reconciliation failure semantics, business fingerprint verification, lock ordering, stale quota-row refresh, single-row claims, lease-bound permits, credential-wide claim pause, and manifest-level CLI assertions. Historical evidence was appended rather than rewritten.

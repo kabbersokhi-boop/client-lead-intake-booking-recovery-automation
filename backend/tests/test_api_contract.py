@@ -15,8 +15,15 @@ class RecordingEmailGateway:
     def __init__(self):
         self.messages = []
 
-    def send(self, recipient, subject, body):
-        self.messages.append({"recipient": recipient, "subject": subject, "body": body})
+    def send(self, recipient, subject, plain_text, html_text):
+        self.messages.append(
+            {
+                "recipient": recipient,
+                "subject": subject,
+                "plain_text": plain_text,
+                "html_text": html_text,
+            }
+        )
 
 
 def booking_for(correlation_id):

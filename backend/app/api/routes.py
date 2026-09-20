@@ -7,7 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.security import require_crm_adapter_key
-from app.config import settings
 from app.db.session import get_db
 from app.models import (
     Appointment,
@@ -44,6 +43,7 @@ from app.schemas.recovery import (
     FaultRunUpdate,
     IncidentCreate,
     QuotaPermissionRequest,
+    ReconciliationFailureRequest,
     RecoveryAdmission,
     RecoveryJobResponse,
 )
@@ -66,39 +66,77 @@ lifecycle_service = LifecycleService()
 recovery_service = RecoveryService()
 
 
-def _fault_run_for(db: Session, submission_id: uuid.UUID) -> CRMFaultRun | None:
-    runs = db.scalars(select(CRMFaultRun).where(CRMFaultRun.active.is_(True)).with_for_update())
-    return next(
-        (run for run in runs if str(submission_id) in {str(value) for value in run.submission_ids}),
+def _fault_run_for(
+    db: Session, submission_id: uuid.UUID, *, lock: bool = True
+) -> CRMFaultRun | None:
+    candidate = next(
+        (
+            run
+            for run in db.scalars(
+                select(CRMFaultRun)
+                .where(CRMFaultRun.active.is_(True))
+                .order_by(CRMFaultRun.created_at, CRMFaultRun.run_id)
+            )
+            if str(submission_id) in {str(value) for value in run.submission_ids}
+        ),
         None,
     )
+    if not candidate or not lock:
+        return candidate
+    run = db.scalar(
+        select(CRMFaultRun)
+        .where(CRMFaultRun.run_id == candidate.run_id, CRMFaultRun.active.is_(True))
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not run or str(submission_id) not in {str(value) for value in run.submission_ids}:
+        return None
+    return run
 
 
 def _apply_fault_quota(
-    db: Session, submission_id: uuid.UUID, execution_reference: str | None = None
+    db: Session,
+    submission_id: uuid.UUID,
+    lease_token: uuid.UUID | None = None,
 ) -> None:
+    job = db.scalar(
+        select(CRMWriteJob)
+        .where(CRMWriteJob.submission_id == submission_id)
+        .with_for_update()
+    )
+    now = datetime.now(timezone.utc)
+    if lease_token and (
+        not job
+        or job.state != "processing"
+        or job.lease_token != lease_token
+        or job.lease_expires_at is None
+        or RecoveryService._aware(job.lease_expires_at) <= now
+    ):
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Recovery write lease is stale.")
     run = _fault_run_for(db, submission_id)
     if not run:
+        db.rollback()
         return
     if run.hold_delivery:
         db.rollback()
         raise HTTPException(
             status_code=503, detail="Synthetic batch delivery is held for preparation."
         )
-    now = datetime.now(timezone.utc)
-    permitted_job = db.scalar(
-        select(CRMWriteJob)
-        .where(
-            CRMWriteJob.submission_id == submission_id,
-            CRMWriteJob.state == "processing",
-            CRMWriteJob.quota_permit_until.is_not(None),
-        )
-        .with_for_update()
-    )
-    if permitted_job and RecoveryService._aware(permitted_job.quota_permit_until) >= now:
-        permitted_job.quota_permit_until = None
+    if (
+        lease_token
+        and job
+        and job.quota_permit_lease_token == lease_token
+        and job.quota_permit_until is not None
+        and RecoveryService._aware(job.quota_permit_until) >= now
+    ):
+        job.quota_permit_until = None
+        job.quota_permit_lease_token = None
         db.commit()
         return
+    if job:
+        job.quota_permit_until = None
+        job.quota_permit_lease_token = None
     window_start = run.window_started_at
     if window_start is not None and window_start.tzinfo is None:
         window_start = window_start.replace(tzinfo=timezone.utc)
@@ -111,38 +149,6 @@ def _apply_fault_quota(
             1,
             math.ceil((window_start + timedelta(seconds=run.window_seconds) - now).total_seconds()),
         )
-        job = db.scalar(
-            select(CRMWriteJob)
-            .where(
-                CRMWriteJob.submission_id == submission_id,
-                CRMWriteJob.state != "completed",
-            )
-            .with_for_update()
-        )
-        if job:
-            job.attempt_count += 1
-            job.state = (
-                "needs_review"
-                if job.attempt_count >= settings.crm_recovery_max_attempts
-                else "retry_wait"
-            )
-            job.due_at = now + timedelta(seconds=retry_after)
-            job.last_error_class = "http_429"
-            job.last_error_message = "Controlled local CRM write quota exceeded."
-            db.add(
-                CRMWriteAttempt(
-                    job_id=job.id,
-                    attempt_number=job.attempt_count,
-                    started_at=now,
-                    finished_at=now,
-                    outcome="failed",
-                    status_code=429,
-                    error_class="http_429",
-                    retry_after_raw=str(retry_after),
-                    retry_after_seconds=retry_after,
-                    execution_reference=execution_reference,
-                )
-            )
         db.commit()
         raise HTTPException(
             status_code=429,
@@ -160,6 +166,7 @@ def _crm_response(result) -> CRMCreateResponse:
         crm_lead_id=lead.id,
         submission_id=lead.submission_id,
         correlation_id=lead.correlation_id,
+        submission_fingerprint=lead.submission_fingerprint,
         pipeline_stage=lead.pipeline_stage,
         ai_status=lead.ai_status,
         intake_state="created" if result.created else "replayed",
@@ -180,17 +187,64 @@ def create_crm_lead(
     payload: CRMLeadCreate,
     response: Response,
     x_n8n_execution_reference: str | None = Header(default=None),
+    x_recovery_lease_token: uuid.UUID | None = Header(default=None),
+    x_crm_diagnostic: str | None = Header(default=None),
     _: None = Depends(require_crm_adapter_key),
     db: Session = Depends(get_db),
 ) -> CRMCreateResponse:
-    _apply_fault_quota(db, payload.submission_id, x_n8n_execution_reference)
+    diagnostic = None
+    if x_crm_diagnostic == "controlled-local-fault":
+        try:
+            diagnostic = recovery_service.begin_diagnostic_attempt(
+                db, payload.submission_id, x_n8n_execution_reference
+            )
+        except RecoveryConflictError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+    owning_lease = diagnostic[0].lease_token if diagnostic else x_recovery_lease_token
     try:
+        _apply_fault_quota(db, payload.submission_id, owning_lease)
         result = provider.create_lead(db, payload)
+    except HTTPException as error:
+        if diagnostic:
+            retry_after = error.headers.get("Retry-After") if error.headers else None
+            recovery_service.fail(
+                db,
+                diagnostic[0].id,
+                diagnostic[0].lease_token,
+                diagnostic[1].id,
+                error.status_code,
+                f"http_{error.status_code}",
+                "Development CRM write did not complete.",
+                retry_after,
+                x_n8n_execution_reference,
+            )
+        raise
     except SubmissionConflictError as error:
+        if diagnostic:
+            recovery_service.fail(
+                db,
+                diagnostic[0].id,
+                diagnostic[0].lease_token,
+                diagnostic[1].id,
+                409,
+                "submission_conflict",
+                "Submission identity conflicts with CRM data.",
+                None,
+                x_n8n_execution_reference,
+            )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Submission identifier is already associated with different lead data.",
         ) from error
+    if diagnostic:
+        recovery_service.complete(
+            db,
+            diagnostic[0].id,
+            diagnostic[0].lease_token,
+            result.lead.id,
+            diagnostic[1].id,
+            201 if result.created else 200,
+        )
     response.status_code = status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
     return _crm_response(result)
 
@@ -212,7 +266,7 @@ def durable_intake(
         result = provider.create_lead(db, admission.payload)
         response.status_code = 200
         return _crm_response(result).model_dump(mode="json")
-    fault_run = _fault_run_for(db, admission.payload.submission_id)
+    fault_run = _fault_run_for(db, admission.payload.submission_id, lock=False)
     if fault_run and fault_run.hold_delivery:
         db.rollback()
         response.status_code = 202
@@ -229,7 +283,7 @@ def durable_intake(
         claimed = recovery_service.claim_specific(
             db, job.id, "intake-workflow", admission.execution_reference
         )
-        recovery_service.start_attempt(
+        attempt = recovery_service.start_attempt(
             db, job.id, claimed.lease_token, admission.execution_reference
         )
     except RecoveryConflictError:
@@ -245,9 +299,7 @@ def durable_intake(
             "recovery_state": job.state,
         }
     try:
-        _apply_fault_quota(
-            db, admission.payload.submission_id, admission.execution_reference
-        )
+        _apply_fault_quota(db, admission.payload.submission_id, claimed.lease_token)
         result = provider.create_lead(db, admission.payload)
     except HTTPException as error:
         retry_after = error.headers.get("Retry-After") if error.headers else None
@@ -255,6 +307,7 @@ def durable_intake(
             db,
             job.id,
             claimed.lease_token,
+            attempt.id,
             error.status_code,
             f"http_{error.status_code}",
             "Development CRM write did not complete.",
@@ -262,6 +315,8 @@ def durable_intake(
             admission.execution_reference,
         )
         response.status_code = 202
+        if retry_after:
+            response.headers["Retry-After"] = retry_after
         return {
             "state": "received",
             "intake_state": "queued",
@@ -275,6 +330,7 @@ def durable_intake(
             db,
             job.id,
             claimed.lease_token,
+            attempt.id,
             409,
             "submission_conflict",
             "Submission identity conflicts with CRM data.",
@@ -284,7 +340,14 @@ def durable_intake(
         raise HTTPException(
             status_code=409, detail="Submission identity conflicts with CRM data."
         ) from error
-    recovery_service.complete(db, job.id, claimed.lease_token, result.lead.id)
+    recovery_service.complete(
+        db,
+        job.id,
+        claimed.lease_token,
+        result.lead.id,
+        attempt.id,
+        201 if result.created else 200,
+    )
     response.status_code = 201 if result.created else 200
     return _crm_response(result).model_dump(mode="json")
 
@@ -303,6 +366,7 @@ def lookup_crm_lead(
         crm_lead_id=lead.id,
         submission_id=lead.submission_id,
         correlation_id=lead.correlation_id,
+        submission_fingerprint=lead.submission_fingerprint,
         pipeline_stage=lead.pipeline_stage,
         ai_status=lead.ai_status,
         intake_state="replayed",
@@ -408,7 +472,10 @@ def recovery_quota_permission(
         db.commit()
         return {"granted": False, "retry_after_seconds": delay}
     run.window_count += 1
-    job.quota_permit_until = now + timedelta(seconds=min(30, run.window_seconds))
+    window_end = window_start + timedelta(seconds=run.window_seconds)
+    lease_end = RecoveryService._aware(job.lease_expires_at)
+    job.quota_permit_until = min(now + timedelta(seconds=5), window_end, lease_end)
+    job.quota_permit_lease_token = request.lease_token
     db.commit()
     return {"granted": True, "retry_after_seconds": 0}
 
@@ -438,7 +505,14 @@ def complete_recovery_job(
     db: Session = Depends(get_db),
 ) -> CRMWriteJob:
     try:
-        return recovery_service.complete(db, job_id, request.lease_token, request.crm_lead_id)
+        return recovery_service.complete(
+            db,
+            job_id,
+            request.lease_token,
+            request.crm_lead_id,
+            request.attempt_id,
+            request.status_code,
+        )
     except StaleLeaseError as error:
         raise HTTPException(
             status_code=409, detail="Lease is stale or no longer owns this job."
@@ -459,11 +533,58 @@ def fail_recovery_job(
             db,
             job_id,
             request.lease_token,
+            request.attempt_id,
             request.status_code,
             request.error_class,
             request.safe_message,
             request.retry_after,
             request.execution_reference,
+        )
+    except StaleLeaseError as error:
+        raise HTTPException(
+            status_code=409, detail="Lease is stale or no longer owns this job."
+        ) from error
+    except RecoveryConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/api/recovery/jobs/{job_id}/reconciliation-absent",
+    response_model=RecoveryJobResponse,
+)
+def confirm_recovery_reconciliation_absent(
+    job_id: uuid.UUID,
+    request: AttemptRequest,
+    _: None = Depends(require_crm_adapter_key),
+    db: Session = Depends(get_db),
+) -> CRMWriteJob:
+    try:
+        return recovery_service.confirm_absent(db, job_id, request.lease_token)
+    except StaleLeaseError as error:
+        raise HTTPException(
+            status_code=409, detail="Lease is stale or no longer owns this job."
+        ) from error
+
+
+@router.post(
+    "/api/recovery/jobs/{job_id}/reconciliation-fail",
+    response_model=RecoveryJobResponse,
+)
+def fail_recovery_reconciliation(
+    job_id: uuid.UUID,
+    request: ReconciliationFailureRequest,
+    _: None = Depends(require_crm_adapter_key),
+    db: Session = Depends(get_db),
+) -> CRMWriteJob:
+    try:
+        return recovery_service.fail_reconciliation(
+            db,
+            job_id,
+            request.lease_token,
+            request.status_code,
+            request.error_class,
+            request.safe_message,
+            request.retry_after,
         )
     except StaleLeaseError as error:
         raise HTTPException(
@@ -523,10 +644,31 @@ def update_fault_run(
     _: None = Depends(require_crm_adapter_key),
     db: Session = Depends(get_db),
 ) -> dict:
-    run = db.get(CRMFaultRun, run_id)
+    runs = list(
+        db.scalars(select(CRMFaultRun).order_by(CRMFaultRun.run_id).with_for_update())
+    )
+    run = next((candidate for candidate in runs if candidate.run_id == run_id), None)
     if not run:
         raise HTTPException(status_code=404, detail="Fault run not found.")
     if request.active is not None:
+        if request.active:
+            scoped_ids = {str(value) for value in run.submission_ids}
+            overlap = next(
+                (
+                    candidate
+                    for candidate in runs
+                    if candidate.run_id != run.run_id
+                    and candidate.active
+                    and scoped_ids.intersection(str(value) for value in candidate.submission_ids)
+                ),
+                None,
+            )
+            if overlap:
+                db.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="Another active fault run already owns part of this synthetic batch.",
+                )
         run.active = request.active
     if request.hold_delivery is not None:
         run.hold_delivery = request.hold_delivery
@@ -538,6 +680,27 @@ def update_fault_run(
         "run_id": run.run_id,
         "active": run.active,
         "hold_delivery": run.hold_delivery,
+        "window_count": run.window_count,
+    }
+
+
+@router.get("/api/recovery/fault-runs/{run_id}")
+def get_fault_run(
+    run_id: uuid.UUID,
+    _: None = Depends(require_crm_adapter_key),
+    db: Session = Depends(get_db),
+) -> dict:
+    run = db.get(CRMFaultRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Fault run not found.")
+    return {
+        "run_id": run.run_id,
+        "submission_ids": run.submission_ids,
+        "active": run.active,
+        "hold_delivery": run.hold_delivery,
+        "request_limit": run.request_limit,
+        "window_seconds": run.window_seconds,
+        "window_started_at": run.window_started_at,
         "window_count": run.window_count,
     }
 
@@ -555,6 +718,36 @@ def list_recovery_jobs(
     if state:
         statement = statement.where(CRMWriteJob.state == state)
     return list(db.scalars(statement))
+
+
+@router.get("/api/recovery/jobs/{job_id}/attempts")
+def list_recovery_attempts(
+    job_id: uuid.UUID,
+    _: None = Depends(require_crm_adapter_key),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    if not db.get(CRMWriteJob, job_id):
+        raise HTTPException(status_code=404, detail="Recovery job not found.")
+    attempts = db.scalars(
+        select(CRMWriteAttempt)
+        .where(CRMWriteAttempt.job_id == job_id)
+        .order_by(CRMWriteAttempt.attempt_number)
+    )
+    return [
+        {
+            "attempt_id": attempt.id,
+            "attempt_number": attempt.attempt_number,
+            "started_at": attempt.started_at,
+            "finished_at": attempt.finished_at,
+            "outcome": attempt.outcome,
+            "status_code": attempt.status_code,
+            "error_class": attempt.error_class,
+            "retry_after_raw": attempt.retry_after_raw,
+            "retry_after_seconds": attempt.retry_after_seconds,
+            "execution_reference": attempt.execution_reference,
+        }
+        for attempt in attempts
+    ]
 
 
 @router.get("/api/crm/follow-ups/due", response_model=list[FollowUpResponse])

@@ -17,9 +17,11 @@ class RecoveryJobResponse(BaseModel):
     id: uuid.UUID
     submission_id: uuid.UUID
     correlation_id: uuid.UUID
+    payload_fingerprint: str
     operation_kind: str
     state: str
     attempt_count: int
+    reconciliation_failure_count: int
     due_at: datetime
     lease_token: uuid.UUID | None
     lease_expires_at: datetime | None
@@ -42,6 +44,7 @@ class AttemptRequest(BaseModel):
 
 
 class FailureRequest(AttemptRequest):
+    attempt_id: uuid.UUID
     status_code: int | None = Field(default=None, ge=100, le=599)
     error_class: str = Field(min_length=1, max_length=80)
     safe_message: str = Field(min_length=1, max_length=300)
@@ -50,6 +53,15 @@ class FailureRequest(AttemptRequest):
 
 class CompleteRequest(AttemptRequest):
     crm_lead_id: uuid.UUID
+    attempt_id: uuid.UUID | None = None
+    status_code: int = Field(default=200, ge=200, le=299)
+
+
+class ReconciliationFailureRequest(AttemptRequest):
+    status_code: int | None = Field(default=None, ge=100, le=599)
+    error_class: str = Field(min_length=1, max_length=80)
+    safe_message: str = Field(min_length=1, max_length=300)
+    retry_after: str | None = Field(default=None, max_length=160)
 
 
 class DeferralRequest(AttemptRequest):

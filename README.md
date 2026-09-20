@@ -32,7 +32,7 @@ PostgreSQL Durable CRM Job + Lead + Pending Follow-up
 - Every validated lead write is persisted before delivery. Confirmed writes remain `201`/`200`; unfinished durable work returns `202 queued` without a fabricated CRM ID or booking access.
 - Recovery claims one due job with a lease, reconciles by stable submission identity, obtains shared quota permission, and then completes, retries, blocks, or holds the job for review. Four total automatic writes are allowed by default; manual requeue authorizes one additional operator attempt without deleting history.
 - The booking operation atomically creates one active appointment per lead, moves the pipeline to `appointment_booked`, and cancels a still-pending follow-up. A repeated `booking_request_id` returns the same appointment; a different booking for that lead returns a controlled conflict.
-- Mailpit is a local development SMTP sink, not a real customer email provider. The actual path is n8n HTTP orchestration → FastAPI development email gateway → SMTP → Mailpit; the public workflows do not use a native n8n SMTP node.
+- Mailpit is a local development SMTP sink, not a real customer email provider. The actual path is n8n HTTP orchestration → FastAPI development email gateway → SMTP → Mailpit; the public workflows do not use a native n8n SMTP node. Follow-up and booking messages are multipart text/HTML, escape stored values, show only persisted optional details, and carry an explicit development notice.
 
 ## Run locally
 
@@ -53,6 +53,7 @@ PostgreSQL Durable CRM Job + Lead + Pending Follow-up
    NVIDIA_NIM_TIMEOUT_MS=18000
    CRM_ADAPTER_API_KEY=<same locally generated adapter key>
    CRM_ADAPTER_TIMEOUT_MS=6000
+   CRM_CONTROL_TIMEOUT_MS=3000
    CRM_ADAPTER_URL=http://backend:8000
    ```
 
@@ -90,6 +91,8 @@ ruff check app tests
 ```
 
 Tests use SQLite for fast API/schema tests and disposable PostgreSQL for migration, persistence, and concurrent replay coverage. Node tests execute the exported n8n code-node logic with deterministic fixtures and browser retry helpers. They never call NVIDIA NIM or n8n. Public GitHub Actions provisions PostgreSQL and runs all deterministic tests without secrets.
+
+The current Phase 3 verifier discovers 79 backend/Python/PostgreSQL tests, 13 browser-helper tests, and 32 workflow-code/structure tests. Live n8n, NVIDIA, and Mailpit checks remain separate and are documented rather than silently mocked.
 
 ## Live verification
 

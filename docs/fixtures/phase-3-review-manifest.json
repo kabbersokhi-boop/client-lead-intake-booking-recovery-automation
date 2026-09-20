@@ -1,0 +1,12 @@
+{
+  "run_id": "f544fc34-8c6b-4dc8-94f9-f125f867c4aa",
+  "description": "Independent-review correction run crossing one five-request fixed quota window; all data is fictional.",
+  "enquiries": [
+    {"submission_id":"5af5d176-b2d6-4ff4-ba57-34e60aa8ed0b","correlation_id":"f1e91d5c-dff8-4264-a5eb-c2e7b730c321","full_name":"Alex Morgan","email":"phase3.review.alex@example.com","phone":"+1 604 555 0241","message":"The furnace fan starts but the rooms remain cold."},
+    {"submission_id":"2ca32fa9-89ee-47d1-8b28-011a0a48d99d","correlation_id":"b480519b-7292-438b-8635-164cfaeae82f","full_name":"Jordan Lee","email":"phase3.review.jordan@example.com","phone":"+1 604 555 0242","message":"The kitchen sink drains very slowly in the evening."},
+    {"submission_id":"15bb4eac-00ab-4d06-a138-2d85bb188a19","correlation_id":"fff5c943-e596-4f0d-8d4b-7717084ee1fb","full_name":"Taylor Singh","email":"phase3.review.taylor@example.com","phone":"+1 604 555 0243","message":"The heat pump stops after several minutes of operation."},
+    {"submission_id":"b28401a1-5e25-4886-b612-102e72a54634","correlation_id":"440ab204-eb36-4f04-a7a6-ffe2a5915ff0","full_name":"Casey Brown","email":"phase3.review.casey@example.com","phone":"+1 604 555 0244","message":"A hallway light flickers when the washer starts."},
+    {"submission_id":"f46e1a04-6821-40af-be63-d626c46c39c6","correlation_id":"70a71b78-9e66-41a9-b451-bc6051596078","full_name":"Riley Chen","email":"phase3.review.riley@example.com","phone":"+1 604 555 0245","message":"The shower loses hot water after a few minutes."},
+    {"submission_id":"36938794-c570-4e6a-a8ae-35016b0b46db","correlation_id":"6c2ccc5c-70a9-4e80-aa8c-d8179fef8e4f","full_name":"Avery Wilson","email":"phase3.review.avery@example.com","phone":"+1 604 555 0246","message":"The furnace makes a rattling sound during startup."}
+  ]
+}

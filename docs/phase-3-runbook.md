@@ -9,13 +9,13 @@ CRM_ADAPTER_API_KEY=... .venv/bin/python scripts/phase3_demo.py status
 curl http://localhost:18000/api/traces/<correlation-id>
 ```
 
-`pending` is ready, `processing` has a lease, `retry_wait` has a future due time, `completed` has a verified matching lead, `needs_review` exhausted or needs correction, and `blocked` requires credential/permission action. A queued browser receipt is not a CRM lead.
+`pending` is ready, `processing` has a lease, `retry_wait` has a future due time, `completed` has a verified identity-matching lead, `needs_review` exhausted or needs correction, and `blocked` requires credential/permission action. A queued browser receipt is not a CRM lead. CLI status reports actual attempt timestamps separately from quota reservations.
 
 ## Retry versus review
 
 429 and transient/ambiguous failures retry only after reconciliation and their durable due time. Valid `Retry-After` wins and is never shortened. 400/404/409/422 go to review; 401/403 block work. Do not alter stored payloads or identities to bypass these states.
 
-After correcting the cause, authenticated `POST /api/recovery/jobs/<job-id>/requeue` authorizes exactly one manual attempt. It does not delete history or reset `attempt_count`. Another failure returns the job to review.
+After correcting the cause, authenticated `POST /api/recovery/jobs/<job-id>/requeue` authorizes exactly one manual attempt. It does not delete history or reset `attempt_count`. Another failure returns the job to review. A 401/403 job pauses new claims for the shared CRM credential; requeue the blocked job only after the credential/permission problem is fixed.
 
 ## Pause, resume, and restart
 
@@ -31,8 +31,8 @@ export CRM_ADAPTER_API_KEY=...
 .venv/bin/python scripts/phase3_demo.py disable
 ```
 
-Use `PHASE3_MANIFEST` for the fresh fixture. `prepare` registers and holds only listed IDs. `before` releases and invokes the unsafe diagnostic webhook. Always run `disable`, even after failure. Keep the diagnostic workflow disabled outside the exercise.
+Use `PHASE3_MANIFEST` for the fresh fixture. `prepare` registers and holds only listed IDs and explicitly leaves that scoped hold active for the next command. `before` releases and invokes the unsafe diagnostic webhook; the expected failure deliberately leaves the scoped quota active for measured recovery. Do not run cleanup between `before` and `recover`. Run `disable` after the evidence is complete or after an unexpected failure. Only one active fault run may own a submission ID. Keep the diagnostic workflow disabled outside the exercise.
 
 ## Preserve and hand over
 
-Do not truncate tables, delete n8n executions, erase Mailpit, reset volumes, or edit failed status. Hand over the manifest/run ID, job states, attempts, incident, execution IDs, and whether faults/diagnostic are disabled. Payloads are private runtime data and must not be copied into public incident documents.
+Do not truncate tables, delete n8n executions, erase Mailpit, reset volumes, or edit failed status. Hand over the manifest/run ID, job states, attempts, incident, execution IDs, and whether faults/diagnostic are disabled. Confirm manifest success by exact IDs, matching lead/job identities, zero missing IDs, and zero duplicate IDs—not only the number of completed jobs. Payloads are private runtime data and must not be copied into public incident documents.

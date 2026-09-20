@@ -163,6 +163,7 @@ class CRMCreateResponse(BaseModel):
     crm_lead_id: uuid.UUID
     submission_id: uuid.UUID
     correlation_id: uuid.UUID
+    submission_fingerprint: str = Field(min_length=64, max_length=64)
     pipeline_stage: str
     ai_status: str
     intake_state: str

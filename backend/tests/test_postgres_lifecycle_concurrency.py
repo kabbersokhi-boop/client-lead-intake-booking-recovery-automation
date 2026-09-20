@@ -32,12 +32,21 @@ class CoordinatedEmailGateway:
         self.messages: list[dict[str, str]] = []
         self._lock = threading.Lock()
 
-    def send(self, recipient: str, subject: str, body: str) -> None:
+    def send(
+        self, recipient: str, subject: str, plain_text: str, html_text: str
+    ) -> None:
         self.entered.set()
         if not self.release.wait(timeout=5):
             raise TimeoutError("test email gateway was not released")
         with self._lock:
-            self.messages.append({"recipient": recipient, "subject": subject, "body": body})
+            self.messages.append(
+                {
+                    "recipient": recipient,
+                    "subject": subject,
+                    "plain_text": plain_text,
+                    "html_text": html_text,
+                }
+            )
 
 
 @pytest.fixture(scope="module")

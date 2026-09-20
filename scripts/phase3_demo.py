@@ -56,6 +56,19 @@ def control(manifest, **changes):
     )[1]
 
 
+def fault_state(manifest, allow_missing=False):
+    status_code, result = request(
+        f"{BACKEND_URL}/api/recovery/fault-runs/{manifest['run_id']}",
+        authenticated=True,
+        allow_error=True,
+    )
+    if status_code == 404 and allow_missing:
+        return None
+    if status_code != 200:
+        raise RuntimeError(f"Fault-run inspection failed with HTTP {status_code}")
+    return result
+
+
 def register(manifest):
     status_code, _ = request(
         f"{BACKEND_URL}/api/recovery/fault-runs",
@@ -72,10 +85,25 @@ def register(manifest):
     )
     if status_code not in {200, 409}:
         raise RuntimeError(f"Fault-run registration failed with HTTP {status_code}")
+    if status_code == 409:
+        current = fault_state(manifest)
+        expected_ids = {item["submission_id"] for item in manifest["enquiries"]}
+        if (
+            set(current["submission_ids"]) != expected_ids
+            or current["request_limit"] != 5
+            or current["window_seconds"] != 10
+        ):
+            raise RuntimeError(
+                "Existing fault run does not match this manifest and quota configuration"
+            )
+    return status_code == 200
 
 
 def scoped_state(manifest):
-    identifiers = {item["submission_id"] for item in manifest["enquiries"]}
+    expected_by_submission = {
+        item["submission_id"]: item for item in manifest["enquiries"]
+    }
+    identifiers = set(expected_by_submission)
     jobs = request(f"{BACKEND_URL}/api/recovery/jobs", authenticated=True)[1]
     leads = request(f"{BACKEND_URL}/api/leads")[1]
     scoped_jobs = [job for job in jobs if job["submission_id"] in identifiers]
@@ -86,6 +114,40 @@ def scoped_state(manifest):
     lead_counts = {}
     for lead in scoped_leads:
         lead_counts[lead["submission_id"]] = lead_counts.get(lead["submission_id"], 0) + 1
+    lead_by_submission = {lead["submission_id"]: lead for lead in scoped_leads}
+    job_by_submission = {job["submission_id"]: job for job in scoped_jobs}
+    identity_mismatches = []
+    for submission_id, expected in expected_by_submission.items():
+        job = job_by_submission.get(submission_id)
+        lead = lead_by_submission.get(submission_id)
+        if job and job["correlation_id"] != expected["correlation_id"]:
+            identity_mismatches.append(f"{submission_id}:job_correlation")
+        if lead and (
+            lead["correlation_id"] != expected["correlation_id"]
+            or lead["full_name"] != expected["full_name"]
+            or lead["email"] != expected.get("email")
+            or lead["phone"] != expected.get("phone")
+            or lead["original_message"] != expected["message"]
+        ):
+            identity_mismatches.append(f"{submission_id}:lead_business_data")
+    completed_mismatches = sorted(
+        job["submission_id"]
+        for job in scoped_jobs
+        if job["state"] == "completed"
+        and (
+            not job.get("completed_lead_id")
+            or job["submission_id"] not in lead_by_submission
+            or lead_by_submission[job["submission_id"]]["id"] != job["completed_lead_id"]
+        )
+    )
+    attempts = []
+    for job in scoped_jobs:
+        attempts.extend(
+            request(
+                f"{BACKEND_URL}/api/recovery/jobs/{job['id']}/attempts",
+                authenticated=True,
+            )[1]
+        )
     return {
         "expected": len(identifiers),
         "jobs": counts,
@@ -94,41 +156,89 @@ def scoped_state(manifest):
         "duplicate_submission_ids": sorted(
             identifier for identifier, count in lead_counts.items() if count > 1
         ),
+        "completed_job_lead_mismatches": completed_mismatches,
+        "identity_mismatches": sorted(identity_mismatches),
+        "actual_write_attempts": sorted(
+            attempts, key=lambda attempt: (attempt["started_at"], attempt["attempt_number"])
+        ),
+        "quota_window": fault_state(manifest, allow_missing=True),
     }
 
 
 def prepare(manifest):
-    register(manifest)
-    control(manifest, active=True, hold_delivery=True, reset_window=True)
-    for enquiry in manifest["enquiries"]:
-        intake = {**enquiry, "received_at": datetime.now(timezone.utc).isoformat()}
-        status_code, result = request(INTAKE_URL, method="POST", body=intake)
-        if status_code != 202 or result.get("intake_state") != "queued":
-            raise RuntimeError(f"Expected queued intake, received HTTP {status_code}: {result}")
-    print(json.dumps(scoped_state(manifest), indent=2))
+    prior = fault_state(manifest, allow_missing=True)
+    created = register(manifest)
+    try:
+        control(manifest, active=True, hold_delivery=True, reset_window=True)
+        for enquiry in manifest["enquiries"]:
+            intake = {**enquiry, "received_at": datetime.now(timezone.utc).isoformat()}
+            status_code, result = request(INTAKE_URL, method="POST", body=intake)
+            if status_code != 202 or result.get("intake_state") != "queued":
+                raise RuntimeError(
+                    f"Expected queued intake, received HTTP {status_code}: {result}"
+                )
+    except Exception:
+        if created:
+            control(manifest, active=False, hold_delivery=False, reset_window=True)
+        elif prior is not None:
+            control(
+                manifest,
+                active=prior["active"],
+                hold_delivery=prior["hold_delivery"],
+            )
+        raise
+    state = scoped_state(manifest)
+    state["operator_notice"] = (
+        "This scoped fault remains ACTIVE with delivery HELD for the next demo command."
+    )
+    print(json.dumps(state, indent=2))
 
 
 def before(manifest):
     control(manifest, active=True, hold_delivery=False, reset_window=True)
-    identifiers = {item["submission_id"] for item in manifest["enquiries"]}
-    jobs = request(f"{BACKEND_URL}/api/recovery/jobs", authenticated=True)[1]
-    leads = request(f"{BACKEND_URL}/api/leads")[1]
-    existing = {lead["submission_id"] for lead in leads}
-    scoped = [job for job in jobs if job["submission_id"] in identifiers]
-    scoped.sort(key=lambda job: job["submission_id"] in existing)
-    payloads = [job["payload_json"] for job in scoped]
-    status_code, result = request(
-        DIAGNOSTIC_URL, method="POST", body={"jobs": payloads}, allow_error=True
+    try:
+        identifiers = {item["submission_id"] for item in manifest["enquiries"]}
+        jobs = request(f"{BACKEND_URL}/api/recovery/jobs", authenticated=True)[1]
+        leads = request(f"{BACKEND_URL}/api/leads")[1]
+        existing = {lead["submission_id"] for lead in leads}
+        scoped = [job for job in jobs if job["submission_id"] in identifiers]
+        scoped.sort(key=lambda job: job["submission_id"] in existing)
+        payloads = [job["payload_json"] for job in scoped]
+        status_code, result = request(
+            DIAGNOSTIC_URL, method="POST", body={"jobs": payloads}, allow_error=True
+        )
+    except Exception:
+        control(manifest, active=False, hold_delivery=False, reset_window=True)
+        raise
+    state = scoped_state(manifest)
+    saw_429 = any(
+        attempt["status_code"] == 429 and attempt["outcome"] == "failed"
+        for attempt in state["actual_write_attempts"]
     )
+    partial_completion = 0 < state["matching_leads"] < state["expected"]
+    if not saw_429 or not partial_completion:
+        control(manifest, active=False, hold_delivery=False, reset_window=True)
+        raise RuntimeError(
+            "Diagnostic did not produce both partial CRM completion and a real 429 attempt"
+        )
     print(json.dumps({"diagnostic_http_status": status_code, "body": result}, indent=2))
-    print(json.dumps(scoped_state(manifest), indent=2))
+    print(json.dumps(state, indent=2))
+    print("Scoped quota remains active for the measured recovery command.")
 
 
 def recover(manifest):
     for _ in range(30):
         request(RECOVERY_URL, method="POST", body={}, allow_error=True)
         state = scoped_state(manifest)
-        if state["jobs"].get("completed") == state["expected"]:
+        complete = (
+            state["jobs"].get("completed") == state["expected"]
+            and state["matching_leads"] == state["expected"]
+            and not state["missing"]
+            and not state["duplicate_submission_ids"]
+            and not state["completed_job_lead_mismatches"]
+            and not state["identity_mismatches"]
+        )
+        if complete:
             print(json.dumps(state, indent=2))
             return
         time.sleep(1)
@@ -147,7 +257,9 @@ def main():
     if args.command == "prepare":
         prepare(manifest)
     elif args.command == "release":
-        print(json.dumps(control(manifest, active=True, hold_delivery=False, reset_window=True), indent=2))
+        result = control(manifest, active=True, hold_delivery=False, reset_window=True)
+        result["operator_notice"] = "Scoped quota is ACTIVE and delivery is RELEASED."
+        print(json.dumps(result, indent=2))
     elif args.command == "before":
         before(manifest)
     elif args.command == "recover":
@@ -155,7 +267,9 @@ def main():
     elif args.command == "status":
         print(json.dumps(scoped_state(manifest), indent=2))
     else:
-        print(json.dumps(control(manifest, active=False, hold_delivery=False, reset_window=True), indent=2))
+        result = control(manifest, active=False, hold_delivery=False, reset_window=True)
+        result["operator_notice"] = "Scoped fault is DISABLED and delivery is not held."
+        print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

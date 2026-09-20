@@ -1,4 +1,5 @@
 import hashlib
+import html
 import json
 import smtplib
 import uuid
@@ -43,17 +44,91 @@ class DispatchResult:
 
 
 class DevelopmentEmailGateway:
-    def send(self, recipient: str, subject: str, body: str) -> None:
+    @staticmethod
+    def _safe_header(value: str) -> str:
+        if "\r" in value or "\n" in value:
+            raise EmailDeliveryError("Email header values must not contain line breaks.")
+        return value
+
+    @classmethod
+    def build_message(
+        cls, recipient: str, subject: str, plain_text: str, html_text: str
+    ) -> EmailMessage:
         message = EmailMessage()
-        message["From"] = settings.development_email_from
-        message["To"] = recipient
-        message["Subject"] = subject
-        message.set_content(body)
+        message["From"] = cls._safe_header(settings.development_email_from)
+        message["To"] = cls._safe_header(recipient)
+        message["Subject"] = cls._safe_header(subject)
+        message.set_content(plain_text)
+        message.add_alternative(html_text, subtype="html")
+        return message
+
+    def send(
+        self, recipient: str, subject: str, plain_text: str, html_text: str
+    ) -> None:
+        message = self.build_message(recipient, subject, plain_text, html_text)
         try:
             with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=5) as smtp:
                 smtp.send_message(message)
         except (OSError, smtplib.SMTPException) as error:
             raise EmailDeliveryError("The local development email sink is unavailable.") from error
+
+
+def _service_label(value: str | None) -> str | None:
+    return value.replace("_", " ").title() if value else None
+
+
+def _detail_rows(lead: Lead, appointment_text: str | None = None) -> list[tuple[str, str]]:
+    rows = []
+    if service := _service_label(lead.service_type):
+        rows.append(("Service", service))
+    if lead.location:
+        rows.append(("Location", lead.location))
+    if lead.preferred_time:
+        rows.append(("Preferred time", lead.preferred_time))
+    if appointment_text:
+        rows.append(("Appointment", appointment_text))
+    return rows
+
+
+def _plain_details(rows: list[tuple[str, str]]) -> str:
+    if not rows:
+        return ""
+    return "\n\nRequest details\n" + "\n".join(f"{label}: {value}" for label, value in rows)
+
+
+def _html_message(
+    heading: str,
+    greeting_name: str,
+    paragraphs: list[str],
+    rows: list[tuple[str, str]],
+) -> str:
+    escaped_rows = "".join(
+        "<tr>"
+        "<th style=\"padding:6px 12px 6px 0;text-align:left;vertical-align:top\">"
+        f"{html.escape(label)}</th>"
+        f"<td style=\"padding:6px 0\">{html.escape(value)}</td>"
+        "</tr>"
+        for label, value in rows
+    )
+    details = (
+        "<div style=\"margin:20px 0;padding:14px 18px;border:1px solid #d9e2ec;"
+        "border-radius:8px;background:#f7fafc\"><table role=\"presentation\">"
+        f"{escaped_rows}</table></div>"
+        if escaped_rows
+        else ""
+    )
+    body = "".join(f"<p>{html.escape(paragraph)}</p>" for paragraph in paragraphs)
+    return (
+        "<!doctype html><html><body style=\"font-family:Arial,sans-serif;color:#243b53;"
+        "line-height:1.5;margin:0;padding:24px\">"
+        f"<h1 style=\"font-size:22px;margin:0 0 18px\">{html.escape(heading)}</h1>"
+        f"<p>Hello {html.escape(greeting_name)},</p>{body}{details}"
+        "<p style=\"margin-top:24px;padding-top:16px;border-top:1px solid #d9e2ec;"
+        "font-size:13px;color:#52667a\"><strong>Development demonstration:</strong> "
+        "This message was sent to a local test inbox. It does not confirm a real commercial "
+        "service or external calendar booking.</p>"
+        "<p>Regards,<br>Automation demonstration</p></body></html>"
+    )
 
 
 def booking_fingerprint(payload: BookingCreate) -> str:
@@ -107,13 +182,29 @@ class LifecycleService:
         if not lead.email:
             raise BookingValidationError("An email follow-up requires a lead email address.")
 
+        service_label = _service_label(lead.service_type)
+        subject = (
+            f"Follow-up: {service_label} request"
+            if service_label
+            else "Following up on your service request"
+        )
+        details = _detail_rows(lead)
+        paragraphs = [
+            "Thank you for your enquiry. This follow-up confirms that the saved request "
+            "is ready for review."
+        ]
+        plain_text = (
+            f"Hello {lead.full_name},\n\n{paragraphs[0]}"
+            f"{_plain_details(details)}\n\n"
+            "Development demonstration: This message was sent to a local test inbox. "
+            "It does not confirm a real commercial service or external calendar booking.\n\n"
+            "Regards,\nAutomation demonstration"
+        )
         self.email_gateway.send(
             lead.email,
-            "Following up on your service request",
-            f"Hello {lead.full_name},\n\n"
-            "Thank you for contacting our synthetic home-services demonstration. "
-            "This is a development test email generated by the lifecycle workflow.\n\n"
-            "Regards,\nAutomation Demonstration",
+            subject,
+            plain_text,
+            _html_message("Service request follow-up", lead.full_name, paragraphs, details),
         )
         sent_at = datetime.now(timezone.utc)
         follow_up.status = "sent"
@@ -278,15 +369,37 @@ class LifecycleService:
         if appointment_at.tzinfo is None:
             appointment_at = appointment_at.replace(tzinfo=timezone.utc)
         local_time = appointment_at.astimezone(business_zone)
+        appointment_text = (
+            f"{local_time.strftime('%A, %B %d, %Y at %I:%M %p')} "
+            f"({appointment.business_timezone})"
+        )
+        follow_up = db.scalar(select(FollowUp).where(FollowUp.lead_id == lead.id))
+        service_label = _service_label(lead.service_type)
+        subject = (
+            f"Appointment confirmed: {service_label}"
+            if service_label
+            else "Appointment confirmed"
+        )
+        paragraphs = ["Your saved demonstration appointment is confirmed."]
+        if follow_up and follow_up.status == "cancelled":
+            paragraphs.append(
+                "The pending follow-up for this request was cancelled after the "
+                "appointment was saved."
+            )
+        details = _detail_rows(lead, appointment_text)
+        plain_text = (
+            f"Hello {lead.full_name},\n\n"
+            + "\n\n".join(paragraphs)
+            + _plain_details(details)
+            + "\n\nDevelopment demonstration: This message was sent to a local test inbox. "
+            "It does not confirm a real commercial service or external calendar booking.\n\n"
+            "Regards,\nAutomation demonstration"
+        )
         self.email_gateway.send(
             lead.email,
-            "Your appointment is booked",
-            f"Hello {lead.full_name},\n\n"
-            f"Your synthetic demonstration appointment is booked for "
-            f"{local_time.strftime('%A, %B %d, %Y at %I:%M %p')} "
-            f"({appointment.business_timezone}).\n\n"
-            "This is a development test email; no real service appointment was created.\n\n"
-            "Regards,\nAutomation Demonstration",
+            subject,
+            plain_text,
+            _html_message("Appointment confirmation", lead.full_name, paragraphs, details),
         )
         sent_at = datetime.now(timezone.utc)
         appointment.confirmation_sent_at = sent_at

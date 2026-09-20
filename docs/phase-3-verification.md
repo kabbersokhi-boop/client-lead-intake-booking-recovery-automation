@@ -6,9 +6,9 @@ Verified locally on 2026-09-20 IST from reviewed baseline `c11a6c13ab1885901aea8
 
 `scripts/verify_phase3.sh` was executed. It created a disposable PostgreSQL 16 container, discovered every configured test file, and removed that container on exit.
 
-- Python/PostgreSQL: 56 passed, 0 skipped.
+- Python/PostgreSQL: 79 passed, 0 skipped.
 - Browser helpers: 13 passed, 0 skipped.
-- Workflow code/structure: 26 passed, 0 skipped.
+- Workflow code/structure: 32 passed, 0 skipped.
 - Ruff, JSON parsing, shell syntax, Compose validation, `git diff --check`, and tracked-content secret scan passed.
 - Live n8n/NVIDIA/Mailpit checks are explicitly skipped by that deterministic script and were executed separately below.
 
@@ -63,3 +63,46 @@ Only n8n was restarted while the main batch had unfinished jobs. PostgreSQL and 
 Both fault runs were disabled and reset. The diagnostic workflow was disabled after evidence capture; recovery and error recording remain available. This phase does not establish a real vendor limit, solve uncertain SMTP delivery, reserve external calendar capacity, or provide exactly-once email.
 
 The exact final-commit CI run is recorded in the completion report after push; a Git commit cannot embed its own eventual SHA without creating another commit.
+
+## 2026-09-20 correction-pass evidence
+
+This section appends evidence from the review of Phase 3 commit `6359d7aea8c59dfbe9c2353820338358438baa35`; it does not replace or alter the original failed execution.
+
+### Corrected at-write 429 and attempt count
+
+An authenticated durable intake for scoped job `00c659fa-4815-49da-939f-4fa2f6be7fed` exhausted the registered fault quota at the actual CRM write boundary. The response was HTTP 202 queued with no CRM lead ID and retained the real `Retry-After: 69` minimum. Exactly one outbound call created exactly one attempt:
+
+- attempt `74ae988d-6531-4436-a933-299d5de586c2`, number 1;
+- started `2026-09-20T00:43:40.289788Z`, finished `00:43:40.307459Z`;
+- status 429, raw/parsed retry delay 69 seconds, durable state `retry_wait`.
+
+Recovery execution `515` started attempt `4c55da18-d191-4127-b0ed-07a6919bde9d` at `00:45:01.272015Z` and completed at `00:45:01.374902Z`. The approximately 81-second interval did not shorten the 69-second minimum. The successful create is now recorded as status 201; replay results are recorded as 200.
+
+After deploying that final export, synthetic no-AI job `d7d2c4b6-349b-40bc-8f31-98b895c828d8` completed in n8n execution `583`. Its sole attempt `68415751-06e0-48ab-9a22-8085245d231f` ran from `01:16:37.728708Z` to `01:16:37.820940Z` and persisted status 201, confirming the runtime uses the corrected export.
+
+Two setup calls are retained but are not claimed as rejection evidence: one 40-second window elapsed before the call, and one job was reclaimed by the scheduled recovery worker. They returned normal created/replayed outcomes and did not have their histories edited.
+
+### Correction batch, replay, and restart
+
+Review fixture run `f544fc34-8c6b-4dc8-94f9-f125f867c4aa` contains six stable fictional identities. All six were prepared through the real intake contract while delivery was held. The backend was restarted with all six jobs still pending. After release, the recovery workflow completed 6/6 jobs and CRM leads with zero missing IDs, zero duplicate IDs, and zero correlation/fingerprint mismatches. Six jobs produced six actual write attempts; quota deferrals did not increment attempt counts.
+
+The same manifest was recovered again. Before and after remained 6/6 complete and matching, and attempts remained 6 rather than increasing. No lead, follow-up, appointment, or confirmation effect was recreated.
+
+The original twelve-ID manifest remains 12/12 unique and matching. Skyler Martin remains `appointment_booked` with appointment `d489e88a-2620-4aa9-8742-71348a6f14d2`, the same cancelled follow-up, and an unchanged confirmation timestamp.
+
+### Ordinary intake and Mailpit
+
+With all fault controls disabled, ordinary n8n intake for submission `b4d6ffcc-a113-4e18-be85-6ace90f7d633` returned 201 and created lead `dc4fe054-edba-4338-824f-51c33cb8d8ba`. The observed AI state was honestly recorded as `fallback_invalid`; no repeated model probe was used to force enrichment.
+
+Actual Mailpit raw messages were inspected without erasing the inbox:
+
+- Follow-up Mailpit ID `5Nj6evFTJAs3mdkuhUK8uQ`, subject `Follow-up: Electrical Service request`, has `multipart/alternative` text/plain and text/html parts, persisted service/location values, and the development notice.
+- Booking Message-ID `<bKhgFNLojiL8jCcDwUo4Ho@mailpit>`, subject `Appointment confirmed: Furnace Service`, has both MIME parts and displays the persisted appointment as `Tuesday, September 22, 2026 at 10:30 AM (America/Vancouver)`. It mentions cancellation because that lead's stored follow-up is actually `cancelled`.
+
+This was a raw MIME and content inspection, not a claimed browser screenshot or full visual automation run.
+
+### Runtime parity and safe state
+
+The deployed recovery workflow is active and the diagnostic workflow is inactive. Their nodes, connections, settings, finite timeouts, and `phase3-crm-recovery-error` links were compared with the sanitized exports. Executions `146`, `283`, `284`, and `515` remain retained. SQLite inspection included the WAL and SHM files so current execution rows were not mistaken for a stale main-file snapshot.
+
+All registered fault runs were disabled with delivery holds off at the end. No volume, prior execution, Mailpit message, lead, or audit history was deleted. The deterministic verifier's live skip is intentional; the local runtime checks above were executed separately.
