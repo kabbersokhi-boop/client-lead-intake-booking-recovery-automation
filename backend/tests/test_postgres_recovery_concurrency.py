@@ -13,9 +13,14 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from test_leads import payload
 
-from app.api.operations import operations_job_detail, operations_jobs, operations_summary
+from app.api.operations import (
+    operations_incidents,
+    operations_job_detail,
+    operations_jobs,
+    operations_summary,
+)
 from app.api.routes import _apply_fault_quota, recovery_quota_permission
-from app.models import CRMFaultRun, CRMWriteJob
+from app.models import CRMFaultRun, CRMWriteAttempt, CRMWriteJob, RecoveryIncident
 from app.schemas.lead import CRMLeadCreate
 from app.schemas.recovery import QuotaPermissionRequest
 from app.services.recovery_service import RecoveryService
@@ -119,6 +124,33 @@ def test_operations_read_projection_uses_postgres_without_mutating_jobs(postgres
         )
         job.payload_json["phase4_secret_canary"] = "not-for-browser"
         job.lease_token = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        job.quota_permit_lease_token = uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
+        job.last_error_message = "Authorization: pg-operations-canary"
+        job.source_execution_reference = "adapter-key-postgres-canary"
+        db.add(
+            CRMWriteAttempt(
+                id=uuid.uuid4(),
+                job_id=job.id,
+                attempt_number=1,
+                started_at=datetime.now(timezone.utc),
+                outcome="failed",
+                lease_token=job.lease_token,
+                error_class="provider-body-postgres-canary",
+                execution_reference="703",
+            )
+        )
+        db.add(
+            RecoveryIncident(
+                id=uuid.uuid4(),
+                event_key=f"postgres-operations-{job.id}",
+                job_id=job.id,
+                correlation_id=job.correlation_id,
+                execution_reference="Authorization: pg-incident-canary",
+                error_class="adapter-key-postgres-canary",
+                state="open",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
         db.commit()
         before = (job.state, job.attempt_count, job.updated_at)
 
@@ -128,15 +160,32 @@ def test_operations_read_projection_uses_postgres_without_mutating_jobs(postgres
             page=1, page_size=25, db=db,
         )
         detail = operations_job_detail(job.id, db)
+        incident_page = operations_incidents(state="all", page=1, page_size=25, db=db)
         db.refresh(job)
 
     assert summary.job_counts.pending >= 1
     assert page.total == 1
     assert page.items[0].id == job.id
     assert detail.completed_lead is None
-    assert detail.attempts == []
-    assert "phase4_secret_canary" not in detail.model_dump_json()
-    assert "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" not in detail.model_dump_json()
+    assert len(detail.attempts) == 1
+    projection = "\n".join(
+        [
+            summary.model_dump_json(),
+            page.model_dump_json(),
+            detail.model_dump_json(),
+            incident_page.model_dump_json(),
+        ]
+    )
+    for canary in [
+        "phase4_secret_canary",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "cccccccc-cccc-cccc-cccc-cccccccccccc",
+        "pg-operations-canary",
+        "adapter-key-postgres-canary",
+        "provider-body-postgres-canary",
+        "pg-incident-canary",
+    ]:
+        assert canary not in projection
     assert (job.state, job.attempt_count, job.updated_at) == before
 
 

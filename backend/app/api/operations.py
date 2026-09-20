@@ -35,7 +35,14 @@ JOB_STATES = (
     "blocked",
     "needs_review",
 )
+MAX_PAGE = 10_000
 EXECUTION_ID_RE = re.compile(r"^[0-9]+$")
+SENSITIVE_RECORDED_VALUE_RE = re.compile(
+    r"(?:authorization\s*:|bearer\s+|(?:api|adapter|crm)[ _-]?key|credential|secret|token|"
+    r"password|payload(?:_json)?|provider[ _-]?(?:body|response))",
+    re.IGNORECASE,
+)
+REDACTED_RECORDED_VALUE = "Redacted unsafe recorded value"
 
 
 def _observed_at() -> datetime:
@@ -47,10 +54,15 @@ def _execution_url(reference: str | None) -> str | None:
     if not reference or not EXECUTION_ID_RE.fullmatch(reference):
         return None
     base = urlsplit(settings.n8n_editor_base_url)
+    try:
+        port = base.port
+    except ValueError:
+        return None
     if (
         base.scheme != "http"
         or base.hostname not in {"localhost", "127.0.0.1"}
-        or base.port != 5678
+        or port != 5678
+        or base.path not in {"", "/"}
         or base.username
         or base.password
         or base.query
@@ -70,16 +82,31 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _safe_recorded_text(value: str | None) -> str | None:
+    """Keep useful bounded operational text without serializing credential-like values."""
+    if value is None:
+        return None
+    if (
+        not value
+        or len(value) > 300
+        or any(character in value for character in "\r\n\x00")
+        or value.lstrip().startswith(("{", "["))
+        or SENSITIVE_RECORDED_VALUE_RE.search(value)
+    ):
+        return REDACTED_RECORDED_VALUE
+    return value
+
+
 def _incident_projection(incident: RecoveryIncident, *, linked: bool) -> OperationsIncident:
     return OperationsIncident(
         id=incident.id,
         job_id=incident.job_id,
         correlation_id=incident.correlation_id,
-        workflow_reference=incident.workflow_reference,
-        execution_reference=incident.execution_reference,
+        workflow_reference=_safe_recorded_text(incident.workflow_reference),
+        execution_reference=_safe_recorded_text(incident.execution_reference),
         execution_url=_execution_url(incident.execution_reference),
-        failed_node=incident.failed_node,
-        error_class=incident.error_class,
+        failed_node=_safe_recorded_text(incident.failed_node),
+        error_class=_safe_recorded_text(incident.error_class) or REDACTED_RECORDED_VALUE,
         state=incident.state,
         resolved_at=incident.resolved_at,
         created_at=incident.created_at,
@@ -112,7 +139,7 @@ def operations_jobs(
     state: JobState | None = None,
     lookup_kind: LookupKind | None = None,
     lookup_id: uuid.UUID | None = None,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=MAX_PAGE),
     page_size: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> OperationsJobPage:
@@ -150,7 +177,7 @@ def operations_jobs(
                 created_at=job.created_at,
                 attempt_count=job.attempt_count,
                 next_eligible_at=_next_eligible_at(job),
-                last_error_class=job.last_error_class,
+                last_error_class=_safe_recorded_text(job.last_error_class),
             )
             for job in jobs
         ],
@@ -200,8 +227,8 @@ def operations_job_detail(job_id: uuid.UUID, db: Session = Depends(get_db)) -> O
         attempt_count=job.attempt_count,
         reconciliation_failure_count=job.reconciliation_failure_count,
         next_eligible_at=_next_eligible_at(job),
-        last_error_class=job.last_error_class,
-        last_error_message=job.last_error_message,
+        last_error_class=_safe_recorded_text(job.last_error_class),
+        last_error_message=_safe_recorded_text(job.last_error_message),
         completed_lead=(
             OperationsLeadReference(
                 id=lead.id, full_name=lead.full_name, pipeline_stage=lead.pipeline_stage
@@ -210,7 +237,7 @@ def operations_job_detail(job_id: uuid.UUID, db: Session = Depends(get_db)) -> O
             else None
         ),
         lease_expired_at_observation=lease_expired,
-        source_execution_reference=job.source_execution_reference,
+        source_execution_reference=_safe_recorded_text(job.source_execution_reference),
         source_execution_url=_execution_url(job.source_execution_reference),
         attempts=[
             OperationsAttempt(
@@ -219,10 +246,10 @@ def operations_job_detail(job_id: uuid.UUID, db: Session = Depends(get_db)) -> O
                 finished_at=attempt.finished_at,
                 outcome=attempt.outcome,
                 status_code=attempt.status_code,
-                error_class=attempt.error_class,
-                retry_after_raw=attempt.retry_after_raw,
+                error_class=_safe_recorded_text(attempt.error_class),
+                retry_after_raw=_safe_recorded_text(attempt.retry_after_raw),
                 retry_after_seconds=attempt.retry_after_seconds,
-                execution_reference=attempt.execution_reference,
+                execution_reference=_safe_recorded_text(attempt.execution_reference),
                 execution_url=_execution_url(attempt.execution_reference),
             )
             for attempt in attempts
@@ -234,7 +261,7 @@ def operations_job_detail(job_id: uuid.UUID, db: Session = Depends(get_db)) -> O
 @router.get("/incidents", response_model=OperationsIncidentPage)
 def operations_incidents(
     state: IncidentFilter = "all",
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=MAX_PAGE),
     page_size: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> OperationsIncidentPage:

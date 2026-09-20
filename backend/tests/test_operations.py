@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from test_leads import payload
 
+from app.api.operations import _execution_url
 from app.models import CRMWriteAttempt, CRMWriteJob, Lead, RecoveryIncident
 from app.schemas.lead import CRMLeadCreate
 from app.services.crm_service import DevelopmentCRMService
@@ -33,11 +34,12 @@ def seed_job(db, *, state="pending", created_at=None, completed=False, correlati
         reconciliation_failure_count=0,
         due_at=created_at + timedelta(minutes=5),
         lease_token=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        quota_permit_lease_token=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
         lease_expires_at=created_at - timedelta(minutes=1),
         completed_lead_id=lead.id if lead else None,
-        last_error_class="provider_<script>alert(1)</script>",
-        last_error_message="message <img src=x onerror=alert(1)>",
-        source_execution_reference="728",
+        last_error_class="api-key-canary",
+        last_error_message="Authorization: Bearer adapter-key-canary",
+        source_execution_reference="provider-response-canary",
         created_at=created_at,
         updated_at=created_at,
     )
@@ -59,7 +61,9 @@ def test_operations_summary_filters_pagination_and_allowlisted_detail(client, db
             CRMWriteAttempt(
                 id=uuid.uuid4(), job_id=retry.id, attempt_number=1, started_at=now,
                 finished_at=now + timedelta(seconds=1), outcome="failed", status_code=503,
-                error_class="http_503", retry_after_raw=None, retry_after_seconds=None,
+                error_class="adapter-key-canary",
+                retry_after_raw="Authorization: Bearer attempt-canary",
+                retry_after_seconds=None,
                 execution_reference="703",
             ),
             CRMWriteAttempt(
@@ -67,7 +71,7 @@ def test_operations_summary_filters_pagination_and_allowlisted_detail(client, db
                 started_at=now + timedelta(seconds=2), finished_at=now + timedelta(seconds=3),
                 outcome="reconciled", status_code=200,
                 error_class=None, retry_after_raw="30", retry_after_seconds=30,
-                execution_reference="unsafe/reference",
+                execution_reference="provider-body-canary",
             ),
             RecoveryIncident(
                 id=uuid.uuid4(), event_key="linked", job_id=retry.id,
@@ -77,8 +81,10 @@ def test_operations_summary_filters_pagination_and_allowlisted_detail(client, db
             ),
             RecoveryIncident(
                 id=uuid.uuid4(), event_key="open", job_id=pending.id,
-                correlation_id=pending.correlation_id, execution_reference="bad/url",
-                error_class="http_429", state="open", created_at=now,
+                correlation_id=pending.correlation_id, workflow_reference="workflow-secret-canary",
+                execution_reference="Authorization: Bearer incident-canary",
+                failed_node="provider-body-canary", error_class="adapter-key-canary",
+                state="open", created_at=now,
             ),
         ]
     )
@@ -108,23 +114,55 @@ def test_operations_summary_filters_pagination_and_allowlisted_detail(client, db
     assert client.get("/api/operations/jobs?lookup_kind=job_id").status_code == 422
     invalid_id = client.get("/api/operations/jobs?lookup_kind=job_id&lookup_id=not-a-uuid")
     assert invalid_id.status_code == 422
+    assert client.get("/api/operations/jobs?page=10001").status_code == 422
+    assert client.get("/api/operations/incidents?page=10001").status_code == 422
     unknown = client.get(f"/api/operations/jobs?lookup_kind=job_id&lookup_id={uuid.uuid4()}")
     assert unknown.json()["items"] == []
 
     detail = client.get(f"/api/operations/jobs/{retry.id}")
     assert detail.status_code == 200
     body = detail.json()
-    serialized = detail.text
-    assert "payload-secret-canary" not in serialized
-    assert "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" not in serialized
+    operations_responses = [
+        summary.text,
+        listed.text,
+        filtered.text,
+        found_submission.text,
+        detail.text,
+        client.get("/api/operations/incidents").text,
+        invalid_id.text,
+    ]
+    serialized = "\n".join(operations_responses)
+    for canary in [
+        "payload-secret-canary",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "adapter-key-canary",
+        "Authorization: Bearer",
+        "provider-response-canary",
+        "attempt-canary",
+        "workflow-secret-canary",
+        "incident-canary",
+        "provider-body-canary",
+    ]:
+        assert canary not in serialized
     assert "payload_json" not in body and "lease_token" not in body
     assert "quota_permit" not in serialized
+    assert body["last_error_class"] == "Redacted unsafe recorded value"
+    assert body["source_execution_reference"] == "Redacted unsafe recorded value"
     assert body["completed_lead"] is None
     assert body["attempts"][0]["execution_url"] == "http://localhost:5678/execution/703"
     assert body["attempts"][1]["execution_url"] is None
     assert body["incidents"][0]["state"] == "resolved"
     completed_detail = client.get(f"/api/operations/jobs/{completed.id}").json()
     assert completed_detail["completed_lead"]["id"] == str(lead.id)
+
+
+def test_execution_urls_require_the_configured_loopback_editor_route(monkeypatch):
+    assert _execution_url("283") == "http://localhost:5678/execution/283"
+    monkeypatch.setattr("app.api.operations.settings.n8n_editor_base_url", "http://localhost:5678/editor")
+    assert _execution_url("283") is None
+    monkeypatch.setattr("app.api.operations.settings.n8n_editor_base_url", "http://example.test:5678")
+    assert _execution_url("283") is None
 
 
 def test_operations_incidents_keep_unlinked_history_and_gets_are_read_only(client, db):
