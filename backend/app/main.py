@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.operations import router as operations_router
+from app.api.reporting import router as reporting_router
 from app.api.routes import router
 from app.config import settings
 
@@ -17,6 +18,7 @@ app.add_middleware(
 )
 app.include_router(router)
 app.include_router(operations_router)
+app.include_router(reporting_router)
 
 
 @app.get("/api/config")

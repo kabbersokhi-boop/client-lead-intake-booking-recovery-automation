@@ -6,13 +6,19 @@ Future phases must update this document before their final commit so the reposit
 
 ## Current checkpoint
 
-- Review date: 2026-09-20.
+- Review date: 2026-09-21.
 - Approved Phase 4 SHA: `3eba4ff17084ab953942b4928ce818ac11d6cf2a`.
 - Previous Phase 4 baseline: `881bd0db75ca9b3e246fc716d72463c28f9d57e8`.
 - Exact-SHA CI: run `35523002102`, job `106110225411`, successful at the approved SHA.
 - CI counts: 93 backend/Python/PostgreSQL tests, 28 frontend/helper tests, and 36 workflow tests, 157 total. These categories must not be described as though every frontend test is a real-browser test or every backend test is a PostgreSQL test.
 - Phases 1–4 are approved for their defined local reference-demo scope.
-- Phase 5 is next. Make reporting, Phase 6 GHL integration, and Phase 7 final presentation work are not implemented at this checkpoint.
+- Phase 5 is implemented and live-verified for the synthetic local reference-demo scope. The
+  authenticated aggregate reporting API and separate inactive manual n8n workflow sent real
+  reports through Make to Google Sheets. Executions `1614` and `1654` proved first-row creation
+  and corrected same-key refresh without duplication. Isolated failure execution `1662` failed
+  visibly without changing customer-critical durable counts. See
+  `docs/phase-5-verification.md` for exact evidence and limitations.
+- Phase 6 GHL integration and Phase 7 final presentation work have not started.
 - Approval does not assert universal bug freedom, production readiness, or a guaranteed hiring outcome.
 
 Before new work, verify that current `HEAD`, `origin/main`, the worktree, runtime, and CI still match the intended starting point. Do not assume this recorded SHA is still current.
@@ -95,7 +101,9 @@ Do not delete, regenerate, cosmetically rewrite, or merge these separate evidenc
 - **NVIDIA NIM:** optional structured enrichment with safe fallback; it is not allowed to decide whether a valid lead is preserved.
 - **Mailpit:** local development SMTP capture, not a production email provider.
 - **Development CRM adapter:** explicit local stand-in, never GoHighLevel.
-- **Make:** not implemented; reserved for downstream management/reporting rather than customer-critical transaction ownership.
+- **Make:** downstream management routing only. The private Custom Webhook, Data Store branch,
+  and Google Sheets destination are live-verified for one synthetic report key. Make remains
+  outside customer-critical transaction ownership and has no database credentials.
 
 Preserve the separation that n8n owns customer-critical intake, booking, and recovery, while Make handles downstream management/reporting. A reporting failure must not undo a lead, block booking, or alter recovery truth.
 
@@ -114,22 +122,38 @@ Preserve the separation that n8n owns customer-critical intake, booking, and rec
 - Keep webhook URLs, API keys, tokens, OAuth credentials, authorization headers, and unrelated account information out of Git, chat, screenshots, fixtures, and documentation.
 - Preserve the approved response allowlists, redaction canaries, GET read purity, safe-link rules, and Phase 1–3 business behavior.
 
-## Phase 5 — next: Make reporting
+## Phase 5 — Make reporting
 
-Phase 5 is proposed, not implemented. The intended direction is a small, separate reporting flow that reads committed application state, sends a minimized management report to a Make custom webhook, and writes a management-readable result to an agreed destination such as Google Sheets.
+The local implementation now provides `GET /api/reporting/management-summary`, protected by the
+existing adapter key, plus inactive manual workflow `phase5-management-reporting`. It reports a
+minimal daily Vancouver aggregate from independent Lead, Appointment, FollowUp, and current
+RecoveryIncident reads. `report_key` is deterministic per business date. The endpoint has no
+write or external-service behavior, and the workflow is separate from all customer-critical
+automation.
 
-Before implementation, settle and record:
+Local verification passes 98 Python/SQLite/PostgreSQL tests, 28 browser/helper tests, and 43
+workflow tests. The preserved n8n runtime contains the inactive workflow; existing workflow states
+and retained executions are unchanged. The backend and n8n-container GET returned sanitized
+aggregate output without changing durable counts. See `docs/phase-5-verification.md` and
+`docs/phase-5-self-review.md`.
 
-- the exact management question and metric definitions;
-- which Lead and Appointment fields truthfully support those metrics;
-- report identity, idempotency, replay, and duplicate-handling behavior;
-- reporting schedule and time zone;
-- destination and table/sheet shape;
-- error visibility and retry behavior that cannot affect customer-critical automation;
-- the user's actual Make Free-plan workspace, available modules, and account access;
-- the chosen destination and its real permissions.
+Live evidence uses stable report key `hvac-daily:2026-09-20`:
 
-Provide the user click-by-click Make UI guidance using the actual Free-plan interface. Do not purchase, upgrade, or rely on a paid feature without explicit user direction. The outbound Make request must not require a public PostgreSQL connection, a public Operations page, or an unnecessary tunnel.
+- `1522`: Make learned the real sanitized 16-field contract.
+- `1614`: New Report added exactly one Google Sheets row and recorded the Data Store key;
+  `generated_at=2026-09-20T19:49:18.570975Z`.
+- `1627`: Existing Report found and updated the same row without duplication, but manual
+  destination inspection exposed stale field mappings: Update a Row sourced old values from
+  Search Rows, so green modules did not produce the intended business change.
+- `1654`: after keeping Row number from Search Rows and mapping all 16 values from Webhooks,
+  Existing Report refreshed the same row to
+  `generated_at=2026-09-20T20:08:34.813643Z`; Row 3 remained empty.
+- `1662`: a per-process unreachable-loopback Make override produced a visible reporting error
+  while counts stayed at 47 Leads, 5 Appointments, 41 FollowUps, 36 CRMWriteJobs,
+  38 CRMWriteAttempts, and 3 RecoveryIncidents.
+
+Do not claim webhook acceptance alone proves destination success or universal exactly-once
+delivery. Do not purchase, upgrade, expose PostgreSQL/Operations, or create a tunnel.
 
 ## Phase 6 — conditional GHL status
 
@@ -166,6 +190,10 @@ Phase 7 is committed future work, not completed work. It must include all sectio
 - Add selected real screenshots with short captions explaining the business action, observed result, failure, diagnosis, correction, and verification.
 - Include the lead form, n8n intake, persisted trace, booking state transition, Mailpit confirmation, Operations view, and actual Make/GHL results only where live-verified.
 - Include failed-run and recovery evidence while keeping the separate execution chains accurate.
+- Include the Phase 5 Make replay mapping bug as a distinct debugging story: green modules but a
+  stale business effect; manual `Generated At` inspection exposed Update Row values sourced from
+  Search Rows; remapping fresh values from Webhooks let execution `1654` prove a real same-row
+  refresh without duplication.
 - Use only completed implementation evidence. Do not invent, cosmetically falsify, or stage results that the system did not produce.
 - Remove secrets, webhook URLs, auth headers, unrelated account data, and real personal data. Retain only synthetic customer examples.
 - Finish the README only after the external-integration status is known, so it accurately distinguishes local, configured, and live-verified components.
@@ -195,6 +223,11 @@ The final rehearsal should use a fresh synthetic lead for the normal journey whi
 6. Open Operations, refresh manually, locate the job by a durable identifier, inspect attempts/incidents, and follow safe trace/execution links.
 7. Use retained diagnostic and recovery executions for failure teaching rather than recreating them.
 8. Show Make and GHL only to the extent actually completed and live-verified in their future phases.
+
+The visual case study must continue to preserve these distinct evidence stories: the Phase 1
+NVIDIA timeout/fallback, `283 -> 284` error-workflow chain, separate `720 -> 722` Retry-After
+recovery, separate `728` lost-ack reconciliation, Phase 4 bad n8n deep-link bug/fix, and the Phase
+5 Make stale-mapping diagnosis/correction. Do not merge them into a fictional sequence.
 
 Prepare fallback screenshots and repository evidence in case an external service is unavailable during the interview.
 
@@ -229,7 +262,11 @@ Read these alongside this handover:
 - `docs/phase-3-self-review.md`
 - `docs/phase-4-verification.md`
 - `docs/phase-4-self-review.md`
+- `docs/phase-5-verification.md`
+- `docs/phase-5-self-review.md`
 - `backend/app/api/operations.py`
+- `backend/app/api/reporting.py`
+- `backend/app/services/reporting_service.py`
 - `frontend/operations.js`
 
 If this handover conflicts with current code or a later approved phase document, inspect history and current runtime evidence rather than silently choosing the more convenient claim. Update this file to resolve the discrepancy before closing the phase.

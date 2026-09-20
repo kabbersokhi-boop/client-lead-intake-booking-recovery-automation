@@ -2,7 +2,7 @@
 
 A fresh technical-interview capability demonstration for an end-to-end enquiry and booking lifecycle. All example data is synthetic. This is not a production client deployment and does not use a fictional product or client brand.
 
-> Current scope: Phase 1 intake, Phase 2 lifecycle/booking, Phase 3 bounded CRM-write recovery, and Phase 4 read-only operations. Make, WhatsApp, real calendar/email providers, and a vendor CRM integration are not implemented. The CRM boundary remains an explicit development adapter.
+> Current scope: Phase 1 intake, Phase 2 lifecycle/booking, Phase 3 bounded CRM-write recovery, Phase 4 read-only operations, and a Phase 5 management-reporting boundary live-verified through Make to an upsert-like Google Sheets destination. WhatsApp, real calendar/email providers, and a vendor CRM integration are not implemented. The CRM boundary remains an explicit development adapter.
 
 ## Architecture
 
@@ -33,6 +33,7 @@ PostgreSQL Durable CRM Job + Lead + Pending Follow-up
 - Recovery claims one due job with a lease, reconciles by stable submission identity, obtains shared quota permission, and then completes, retries, blocks, or holds the job for review. Four total automatic writes are allowed by default; manual requeue authorizes one additional operator attempt without deleting history.
 - The booking operation atomically creates one active appointment per lead, moves the pipeline to `appointment_booked`, and cancels a still-pending follow-up. A repeated `booking_request_id` returns the same appointment; a different booking for that lead returns a controlled conflict.
 - Mailpit is a local development SMTP sink, not a real customer email provider. The actual path is n8n HTTP orchestration → FastAPI development email gateway → SMTP → Mailpit; the public workflows do not use a native n8n SMTP node. Follow-up and booking messages are multipart text/HTML, escape stored values, show only persisted optional details, and carry an explicit development notice.
+- The separate manual Phase 5 workflow reads an authenticated aggregate-only FastAPI projection and sends it to Make from protected n8n runtime configuration. Live executions verified first-row creation and a corrected same-key update without duplication; an isolated failed reporting execution left customer-critical durable counts unchanged. The workflow remains inactive/manual.
 
 ## Run locally
 
@@ -59,13 +60,15 @@ PostgreSQL Durable CRM Job + Lead + Pending Follow-up
 
    When n8n is a separate Docker container, attach it to the Compose network and use `http://backend:8000`; this preserves private container-to-container access while both editor and browser-facing backend stay loopback-bound. The CRM write endpoint requires `X-CRM-Adapter-Key`; the workflow supplies it from n8n runtime configuration. The workflow returns CORS headers for `http://localhost:18000` and the browser uses JSON requests with a 30-second configurable acknowledgement timeout.
 
-4. Import and activate the sanitized workflows:
+4. Import the sanitized workflows. Keep management reporting inactive/manual; activate the five
+   customer and recovery workflows listed before it:
 
    - `n8n/lead-intake.json`
    - `n8n/appointment-booking.json`
    - `n8n/follow-up-dispatch.json`
    - `n8n/crm-recovery-error.json`
    - `n8n/crm-write-recovery.json`
+   - `n8n/management-reporting.json` (manual and inactive until the private Make step)
 
    Keep `n8n/crm-write-diagnostic.json` disabled except during the controlled local fault test. Diagnostic and recovery use `phase3-crm-recovery-error` as their error workflow; exports contain this stable local link and no credentials.
 
@@ -102,6 +105,8 @@ Phase 3 evidence and operations are in [docs/phase-3-verification.md](docs/phase
 
 Open [http://localhost:18000/operations.html](http://localhost:18000/operations.html) for the local, synthetic, read-only operations view. Refresh job-state counts, filter or paste an exact job/submission/correlation UUID, select a job, inspect persisted attempts and incidents, then follow its correlation trace or safely constructed local n8n execution link. The page never sends the adapter key to the browser and cannot claim, retry, requeue, resolve, send, or mutate records. Phase 4 verification and self-review are in [docs/phase-4-verification.md](docs/phase-4-verification.md) and [docs/phase-4-self-review.md](docs/phase-4-self-review.md).
 
+Phase 5 reporting semantics, live Make/Google Sheets evidence, failure isolation, and limitations are recorded in [docs/phase-5-verification.md](docs/phase-5-verification.md) and [docs/phase-5-self-review.md](docs/phase-5-self-review.md). Do not configure the private Make webhook in source-controlled files.
+
 ## Security
 
 - `.env` is ignored and `.env.example` contains placeholders only.
@@ -109,6 +114,7 @@ Open [http://localhost:18000/operations.html](http://localhost:18000/operations.
 - The browser temporarily uses `sessionStorage` only for an ambiguous pending submission so it can retry with the same identity; it clears that data only after verified success. It stores no secrets.
 - Read endpoints are verification-only and Compose keeps them loopback-only. CORS is not used as authentication; the n8n-to-CRM write route uses the shared adapter credential.
 - `/operations.html` uses narrow same-origin browser-safe read projections only. Its local n8n execution links require a numeric reference and configured loopback editor base; arbitrary stored values remain copyable text.
+- `/api/reporting/management-summary` is an adapter-key-protected aggregate-only GET for n8n. It excludes customer PII and recovery internals, and it never calls Make or another external service.
 - Audit metadata intentionally stores only trace and operational state; it never stores secrets.
 - Mailpit data is ephemeral local runtime state and is not committed.
 - Lifecycle row locks prevent ordinary concurrent duplicate sends, but SMTP acceptance and the subsequent PostgreSQL commit are separate effects. A crash or lost acknowledgement between them is not an exactly-once guarantee; uncertain-delivery recovery remains outside Phase 2.

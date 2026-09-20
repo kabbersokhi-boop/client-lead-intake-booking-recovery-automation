@@ -1,0 +1,100 @@
+{
+  "id": "phase5-management-reporting",
+  "name": "Management Reporting - HVAC Snapshot",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Run Management Report Manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 240]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.CRM_ADAPTER_URL + '/api/reporting/management-summary' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-CRM-Adapter-Key",
+              "value": "={{ $env.CRM_ADAPTER_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": "={{ Number($env.CRM_CONTROL_TIMEOUT_MS || 3000) }}"
+        }
+      },
+      "id": "fetch-summary",
+      "name": "Fetch Management Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "const report = $json;\nconst expectedKeys = [\n  'report_version',\n  'report_type',\n  'report_key',\n  'business_date',\n  'business_timezone',\n  'window_start_utc',\n  'window_end_utc',\n  'generated_at',\n  'leads_received',\n  'furnace_requests',\n  'air_conditioning_requests',\n  'other_or_unknown_requests',\n  'needs_review',\n  'appointments_booked',\n  'follow_ups_sent',\n  'open_recovery_incidents_at_generated_at',\n];\nconst countFields = [\n  'leads_received',\n  'furnace_requests',\n  'air_conditioning_requests',\n  'other_or_unknown_requests',\n  'needs_review',\n  'appointments_booked',\n  'follow_ups_sent',\n  'open_recovery_incidents_at_generated_at',\n];\nconst isPlainObject = report && typeof report === 'object' && !Array.isArray(report) && Object.prototype.toString.call(report) === '[object Object]';\nif (!isPlainObject) throw new Error('Management report must be a plain object.');\nconst actualKeys = Object.keys(report).sort();\nconst sortedExpectedKeys = [...expectedKeys].sort();\nif (actualKeys.length !== sortedExpectedKeys.length || actualKeys.some((key, index) => key !== sortedExpectedKeys[index])) throw new Error('Management report field set is invalid.');\nif (report.report_version !== 1 || report.report_type !== 'hvac_management_snapshot') throw new Error('Management report version or type is invalid.');\nif (typeof report.business_date !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(report.business_date)) throw new Error('Management report business date is invalid.');\nconst [year, month, day] = report.business_date.split('-').map(Number);\nif (new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) !== report.business_date) throw new Error('Management report business date does not exist.');\nif (report.report_key !== `hvac-daily:${report.business_date}`) throw new Error('Management report identity is invalid.');\nif (report.business_timezone !== 'America/Vancouver') throw new Error('Management report timezone is invalid.');\nconst timestampFields = ['window_start_utc', 'window_end_utc', 'generated_at'];\nfor (const field of timestampFields) {\n  const value = report[field];\n  if (typeof value !== 'string' || !/(?:Z|[+-]\\d{2}:\\d{2})$/.test(value) || Number.isNaN(Date.parse(value))) throw new Error(`Management report ${field} is invalid.`);\n}\nconst vancouverParts = (value) => Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Vancouver', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(value)).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));\nconst startLocal = vancouverParts(report.window_start_utc);\nconst endLocal = vancouverParts(report.window_end_utc);\nconst startDate = `${startLocal.year}-${startLocal.month}-${startLocal.day}`;\nconst endDate = `${endLocal.year}-${endLocal.month}-${endLocal.day}`;\nconst nextBusinessDate = new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);\nif (startDate !== report.business_date || endDate !== nextBusinessDate || startLocal.hour !== '00' || startLocal.minute !== '00' || startLocal.second !== '00' || endLocal.hour !== '00' || endLocal.minute !== '00' || endLocal.second !== '00') throw new Error('Management report window does not match Vancouver business-day boundaries.');\nconst windowMilliseconds = Date.parse(report.window_end_utc) - Date.parse(report.window_start_utc);\nif (windowMilliseconds < 23 * 60 * 60 * 1000 || windowMilliseconds > 25 * 60 * 60 * 1000) throw new Error('Management report window is invalid.');\nfor (const field of countFields) {\n  if (!Number.isSafeInteger(report[field]) || report[field] < 0) throw new Error(`Management report ${field} must be a non-negative safe integer.`);\n}\nif (report.furnace_requests + report.air_conditioning_requests + report.other_or_unknown_requests !== report.leads_received) throw new Error('Management report lead categories do not reconcile.');\nreturn [{ json: report }];"
+      },
+      "id": "validate-report",
+      "name": "Validate Management Report Contract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MAKE_REPORTING_WEBHOOK_URL }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": "={{ Number($env.MAKE_REPORTING_TIMEOUT_MS || 10000) }}",
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "send-to-make",
+      "name": "Send Sanitized Report to Make",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 240],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $json;\nconst report = $('Validate Management Report Contract').first().json;\nconst error = result?.error || null;\nif (error) {\n  const safeErrorText = typeof error === 'object' ? [error.code, error.name, error.message].filter((value) => typeof value === 'string').join(' ') : String(error);\n  if (/timeout|timed out|ETIMEDOUT|ECONNABORTED/i.test(safeErrorText)) throw new Error('Make reporting webhook timed out.');\n  throw new Error('Make reporting webhook network request failed.');\n}\nconst statusCode = Number(result?.statusCode);\nif (!Number.isInteger(statusCode) || statusCode < 200 || statusCode >= 300) {\n  if (Number.isInteger(statusCode)) throw new Error(`Make reporting webhook returned HTTP ${statusCode}.`);\n  throw new Error('Make reporting webhook returned no verifiable HTTP status.');\n}\nreturn [{ json: { report_key: report.report_key, business_date: report.business_date, make_webhook_accepted: true, make_http_status: statusCode, accepted_at: new Date().toISOString() } }];"
+      },
+      "id": "validate-make-result",
+      "name": "Validate Make Webhook Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 240]
+    }
+  ],
+  "connections": {
+    "Run Management Report Manually": {
+      "main": [[{"node": "Fetch Management Summary", "type": "main", "index": 0}]]
+    },
+    "Fetch Management Summary": {
+      "main": [[{"node": "Validate Management Report Contract", "type": "main", "index": 0}]]
+    },
+    "Validate Management Report Contract": {
+      "main": [[{"node": "Send Sanitized Report to Make", "type": "main", "index": 0}]]
+    },
+    "Send Sanitized Report to Make": {
+      "main": [[{"node": "Validate Make Webhook Result", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
