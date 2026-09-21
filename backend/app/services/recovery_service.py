@@ -122,6 +122,7 @@ class RecoveryService:
                             "http_403",
                             "reconciliation_http_401",
                             "reconciliation_http_403",
+                            "highlevel_authentication",
                         ]
                     ),
                 )

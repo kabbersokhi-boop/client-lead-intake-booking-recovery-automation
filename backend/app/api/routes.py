@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.security import require_crm_adapter_key
+from app.config import settings
 from app.db.session import get_db
 from app.models import (
     Appointment,
@@ -18,7 +19,8 @@ from app.models import (
     Lead,
     RecoveryIncident,
 )
-from app.providers.crm import DevelopmentCRMProvider
+from app.providers.crm import build_crm_provider
+from app.providers.highlevel import HighLevelProviderError
 from app.schemas.lead import (
     AuditEventResponse,
     CRMCreateResponse,
@@ -61,7 +63,7 @@ from app.services.recovery_service import (
 )
 
 router = APIRouter()
-provider = DevelopmentCRMProvider()
+provider = build_crm_provider(settings)
 lifecycle_service = LifecycleService()
 recovery_service = RecoveryService()
 
@@ -175,6 +177,27 @@ def _crm_response(result) -> CRMCreateResponse:
     )
 
 
+def _fail_provider_attempt(
+    db: Session,
+    job_id: uuid.UUID,
+    lease_token: uuid.UUID,
+    attempt_id: uuid.UUID,
+    error: HighLevelProviderError,
+    execution_reference: str | None,
+) -> CRMWriteJob:
+    return recovery_service.fail(
+        db,
+        job_id,
+        lease_token,
+        attempt_id,
+        error.status_code,
+        error.error_class,
+        error.safe_message,
+        error.retry_after,
+        execution_reference,
+    )
+
+
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -235,6 +258,22 @@ def create_crm_lead(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Submission identifier is already associated with different lead data.",
+        ) from error
+    except HighLevelProviderError as error:
+        if diagnostic:
+            _fail_provider_attempt(
+                db,
+                diagnostic[0].id,
+                diagnostic[0].lease_token,
+                diagnostic[1].id,
+                error,
+                x_n8n_execution_reference,
+            )
+        headers = {"Retry-After": error.retry_after} if error.retry_after else None
+        raise HTTPException(
+            status_code=error.status_code or 503,
+            detail=error.safe_message,
+            headers=headers,
         ) from error
     if diagnostic:
         recovery_service.complete(
@@ -346,6 +385,26 @@ def durable_intake(
         raise HTTPException(
             status_code=409, detail="Submission identity conflicts with CRM data."
         ) from error
+    except HighLevelProviderError as error:
+        failed = _fail_provider_attempt(
+            db,
+            job.id,
+            claimed.lease_token,
+            attempt.id,
+            error,
+            admission.execution_reference,
+        )
+        response.status_code = 202
+        if error.retry_after:
+            response.headers["Retry-After"] = error.retry_after
+        return {
+            "state": "received",
+            "intake_state": "queued",
+            "submission_id": str(job.submission_id),
+            "correlation_id": str(job.correlation_id),
+            "recovery_job_id": str(job.id),
+            "recovery_state": failed.state,
+        }
     try:
         recovery_service.complete(
             db,
@@ -377,21 +436,18 @@ def lookup_crm_lead(
     _: None = Depends(require_crm_adapter_key),
     db: Session = Depends(get_db),
 ) -> CRMCreateResponse:
-    lead = db.scalar(select(Lead).where(Lead.submission_id == submission_id))
-    if not lead:
+    try:
+        result = provider.lookup_lead(db, submission_id)
+    except HighLevelProviderError as error:
+        headers = {"Retry-After": error.retry_after} if error.retry_after else None
+        raise HTTPException(
+            status_code=error.status_code or 503,
+            detail=error.safe_message,
+            headers=headers,
+        ) from error
+    if not result:
         raise HTTPException(status_code=404, detail="Lead not found")
-    follow_up = db.scalar(select(FollowUp).where(FollowUp.lead_id == lead.id))
-    return CRMCreateResponse(
-        crm_lead_id=lead.id,
-        submission_id=lead.submission_id,
-        correlation_id=lead.correlation_id,
-        submission_fingerprint=lead.submission_fingerprint,
-        pipeline_stage=lead.pipeline_stage,
-        ai_status=lead.ai_status,
-        intake_state="replayed",
-        follow_up_status=follow_up.status if follow_up else None,
-        follow_up_due_at=follow_up.due_at if follow_up else None,
-    )
+    return _crm_response(result)
 
 
 @router.post("/api/recovery/jobs", response_model=RecoveryJobResponse)

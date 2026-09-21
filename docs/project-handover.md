@@ -7,6 +7,12 @@ Future phases must update this document before their final commit so the reposit
 ## Current checkpoint
 
 - Review date: 2026-09-21.
+- Phase 6 fallback starts from approved Phase 7A checkpoint `bfc4d88dbfb291b2dbcb52eb77e2ab6c2a13dd1b`.
+- Phase 6 implements a separate HighLevel HTTP adapter and loopback-only local contract simulator
+  for the documented contact/opportunity subset. It is not a live integration or vendor sandbox.
+- Phase 6 deterministic verification: 121 Python tests, 28 frontend/helper tests, and 43
+  workflow tests (192 total), plus Ruff, simulator JavaScript/JSON/shell syntax, Compose
+  validation, `git diff --check`, and tracked-content secret scanning.
 - Phase 7A presentation-hardening implementation SHA: `235d1f55156820a1aa0a0b7416bf6a44a3533e4f`.
 - Phase 7A deterministic verification: 98 Python tests, 28 frontend/helper tests, and 43
   workflow tests (169 total), plus Ruff, JavaScript/JSON/shell syntax, Compose validation,
@@ -28,9 +34,9 @@ Future phases must update this document before their final commit so the reposit
   and corrected same-key refresh without duplication. Isolated failure execution `1662` failed
   visibly without changing customer-critical durable counts. See
   `docs/phase-5-verification.md` for exact evidence and limitations.
-- Phase 6 live GoHighLevel integration has not started. Phase 7A presentation hardening is in
-  progress at the current worktree checkpoint; Phase 7 screenshots, final case study, rehearsal,
-  and final interview PDF remain incomplete.
+- Phase 6 local fallback is implemented and live-local verified. Live HighLevel authentication,
+  account mappings, responses, and effects remain unverified. Phase 7B screenshots, final case
+  study, browser rehearsal, and final interview PDF remain incomplete.
 - Approval does not assert universal bug freedom, production readiness, or a guaranteed hiring outcome.
 
 Before new work, verify that current `HEAD`, `origin/main`, the worktree, runtime, and CI still match the intended starting point. Do not assume this recorded SHA is still current.
@@ -136,6 +142,10 @@ verified CRM completion. It does not provide an arbitrary dismiss action. Theref
 - **NVIDIA NIM:** optional structured enrichment with safe fallback; it is not allowed to decide whether a valid lead is preserved.
 - **Mailpit:** local development SMTP capture, not a production email provider.
 - **Development CRM adapter:** explicit local stand-in, never GoHighLevel.
+- **HighLevel adapter:** optional HTTP projection that composes the development persistence path
+  in `highlevel_simulator` mode; it normalizes vendor-contract behavior but does not own retries.
+- **HighLevel Contract Simulator:** separate isolated test service at `http://localhost:18080`;
+  it implements only the used contact/opportunity subset and is not HighLevel or a vendor sandbox.
 - **Make:** downstream management routing only. The private Custom Webhook, Data Store branch,
   and Google Sheets destination are live-verified for one synthetic report key. Make remains
   outside customer-critical transaction ownership and has no database credentials.
@@ -190,18 +200,41 @@ Live evidence uses stable report key `hvac-daily:2026-09-20`:
 Do not claim webhook acceptance alone proves destination success or universal exactly-once
 delivery. Do not purchase, upgrade, expose PostgreSQL/Operations, or create a tunnel.
 
-## Phase 6 — conditional GHL status
+## Phase 6 — HighLevel fallback adapter and local simulator
 
-Only a free GoHighLevel trial is in scope. Phase 6 must first verify actual account access, API availability, authentication options, and trial restrictions.
+`DevelopmentCRMProvider` still creates the authoritative local Lead/follow-up/audit state and is
+the default. `HighLevelCRMProvider` composes that persistence with `HighLevelClient`, which sends
+real HTTP to a separately deployed local simulator in `highlevel_simulator` mode. PostgreSQL and
+the existing n8n recovery workflow retain jobs, leases, attempt limits, `Retry-After`, and
+reconciliation ownership. `highlevel_live` fails closed.
 
-If live GHL API access is available, distinguish verified API behavior from UI-only configuration and document real mappings and evidence. If API access remains unavailable, clearly separate:
+The implemented contract subset is contact upsert/read/exact lookup and opportunity
+search/create/update. Stable submission/correlation custom fields and pre-write duplicate lookup
+prevent a foreign same-email/phone contact from being relabelled. Appointment and automatic stage
+sync are omitted because a correct implementation needs a durable lifecycle-sync boundary and
+verified calendar/account IDs; Phase 2 booking was not weakened by an external call.
 
-- GHL UI configuration;
-- field and pipeline mapping readiness;
-- proposed integration design;
-- live integration that was not verified.
+Live-local evidence on 2026-09-21:
 
-Never rename the development CRM as GHL, imply a live GHL result that was not observed, or hide trial/account limitations.
+- Normal submission `e43a9631-3ba2-4acf-85cf-d3b7a1366f52` completed once locally and produced
+  one contact and one opportunity. After rebuilding/resetting only the isolated simulator from
+  final code, exact replay restored contact `sim_contact_e5a894882a2547d2` and opportunity
+  `sim_opportunity_d533b972920844e0` without duplicating either logical effect.
+- A one-shot 429 for submission `ff09e6a2-2fa4-4508-b166-a6c90520c42a` preserved
+  `Retry-After: 3`; active recovery execution `2096` reconciled and completed attempt 2, producing
+  exactly one logical contact and opportunity. Final exact-code replay restored contact
+  `sim_contact_694623499a4b47ea` and opportunity `sim_opportunity_521c5a5676b84f05`.
+- Simulator destination state held two contacts, two opportunities, zero appointments, 16
+  sanitized API events, no serialized Authorization field, and fault mode Normal.
+- Durable counts after the controlled evidence were 49 Leads, 5 Appointments, 43 FollowUps, 38
+  CRMWriteJobs, 41 CRMWriteAttempts, and 3 RecoveryIncidents; no CRM fault run was active.
+- The direct durable-intake route was used for the normal request to avoid an unnecessary NVIDIA
+  call. Execution `2096` proves the preserved n8n recovery path through FastAPI, the adapter, and
+  the external simulator service. No SMTP, booking, diagnostic injection, or real vendor call ran.
+
+See `docs/phase-6-verification.md` and `docs/phase-6-self-review.md` for the official documentation
+source record, contract details, tests, security review, and limitations. Never present the
+simulator as a HighLevel sandbox or the adapter as live-verified.
 
 ## Phase 7 — presentation hardening and remaining work
 
@@ -215,8 +248,8 @@ unchanged. The self-contained browser-first walkthrough is
 `docs/interview-demo-runbook.md`; it includes the `272`/`276`/`283` distinction and the Phase 5
 Make `1614`/`1627`/`1654` debugging story.
 
-GoHighLevel live integration remains unverified and is not part of this pass. The CRM boundary
-remains `DevelopmentCRMProvider`; no development component may be relabelled as GoHighLevel.
+HighLevel live integration remains unverified. `DevelopmentCRMProvider` remains a distinct local
+implementation; the Phase 6 adapter and simulator are an optional, explicitly non-live path.
 
 The remaining Phase 7 work is screenshot selection/redaction, final README case-study polish,
 browser rehearsal, and rebuilding the final interview PDF. Do not treat those deliverables as
@@ -272,7 +305,8 @@ The final rehearsal should use a fresh synthetic lead for the normal journey whi
 5. Show the follow-up cancellation and the appointment/booking confirmation captured in Mailpit.
 6. Open Operations, refresh manually, locate the job by a durable identifier, inspect attempts/incidents, and follow safe trace/execution links.
 7. Use retained diagnostic and recovery executions for failure teaching rather than recreating them.
-8. Show Make and GHL only to the extent actually completed and live-verified in their future phases.
+8. Show Make only to its recorded live verification extent; show the HighLevel Contract Simulator
+   only as local contract-test evidence, never as a live vendor account.
 
 The visual case study must continue to preserve these distinct evidence stories: the Phase 1
 NVIDIA timeout/fallback, `283 -> 284` error-workflow chain, separate `720 -> 722` Retry-After
@@ -314,6 +348,10 @@ Read these alongside this handover:
 - `docs/phase-4-self-review.md`
 - `docs/phase-5-verification.md`
 - `docs/phase-5-self-review.md`
+- `docs/phase-6-verification.md`
+- `docs/phase-6-self-review.md`
+- `backend/app/providers/highlevel.py`
+- `backend/simulator/main.py`
 - `backend/app/api/operations.py`
 - `backend/app/api/reporting.py`
 - `backend/app/services/reporting_service.py`

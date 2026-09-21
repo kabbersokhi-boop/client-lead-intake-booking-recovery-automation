@@ -33,13 +33,16 @@ echo "[phase3] Python/PostgreSQL tests (pytest discovers backend/tests)"
 .venv/bin/python -m pytest -q -ra backend/tests
 
 echo "[phase3] Python lint"
-.venv/bin/ruff check backend/app backend/tests scripts/phase3_demo.py
+.venv/bin/ruff check backend/app backend/simulator backend/tests scripts/phase3_demo.py
 
 echo "[phase3] Browser tests (Node wildcard discovery)"
 npm run test:browser
 
 echo "[phase3] Workflow-code tests (Node wildcard discovery)"
 npm run test:workflow
+
+echo "[phase3] Simulator JavaScript syntax"
+node --check backend/simulator/static/app.js
 
 echo "[phase3] JSON, shell, Compose, and diff checks"
 .venv/bin/python - <<'PY'

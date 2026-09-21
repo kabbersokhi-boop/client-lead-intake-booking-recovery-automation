@@ -22,6 +22,18 @@ services:
       N8N_BOOKING_WEBHOOK_URL: ${N8N_BOOKING_WEBHOOK_URL:-http://localhost:5678/webhook/appointment-booking}
       N8N_REQUEST_TIMEOUT_MS: ${N8N_REQUEST_TIMEOUT_MS:-30000}
       CRM_ADAPTER_API_KEY: ${CRM_ADAPTER_API_KEY:-}
+      CRM_PROVIDER_MODE: ${CRM_PROVIDER_MODE:-development}
+      HIGHLEVEL_BASE_URL: ${HIGHLEVEL_BASE_URL:-http://highlevel-simulator:8080}
+      HIGHLEVEL_TOKEN: ${HIGHLEVEL_SIMULATOR_TOKEN:-}
+      HIGHLEVEL_LOCATION_ID: ${HIGHLEVEL_LOCATION_ID:-sim_location_reference}
+      HIGHLEVEL_PIPELINE_ID: ${HIGHLEVEL_PIPELINE_ID:-sim_pipeline_hvac}
+      HIGHLEVEL_STAGE_NEW_LEAD_ID: ${HIGHLEVEL_STAGE_NEW_LEAD_ID:-sim_stage_new_lead}
+      HIGHLEVEL_STAGE_CONTACTED_ID: ${HIGHLEVEL_STAGE_CONTACTED_ID:-sim_stage_contacted}
+      HIGHLEVEL_STAGE_APPOINTMENT_BOOKED_ID: ${HIGHLEVEL_STAGE_APPOINTMENT_BOOKED_ID:-sim_stage_appointment_booked}
+      HIGHLEVEL_CONTACT_SUBMISSION_FIELD_ID: ${HIGHLEVEL_CONTACT_SUBMISSION_FIELD_ID:-sim_cf_submission_id}
+      HIGHLEVEL_CONTACT_CORRELATION_FIELD_ID: ${HIGHLEVEL_CONTACT_CORRELATION_FIELD_ID:-sim_cf_correlation_id}
+      HIGHLEVEL_OPPORTUNITY_SUBMISSION_FIELD_ID: ${HIGHLEVEL_OPPORTUNITY_SUBMISSION_FIELD_ID:-sim_of_submission_id}
+      HIGHLEVEL_TIMEOUT_SECONDS: ${HIGHLEVEL_TIMEOUT_SECONDS:-2}
       FOLLOW_UP_DELAY_SECONDS: ${FOLLOW_UP_DELAY_SECONDS:-120}
       CRM_RECOVERY_MAX_ATTEMPTS: ${CRM_RECOVERY_MAX_ATTEMPTS:-4}
       CRM_RECOVERY_LEASE_SECONDS: ${CRM_RECOVERY_LEASE_SECONDS:-30}
@@ -37,6 +49,19 @@ services:
         condition: service_started
     ports:
       - "127.0.0.1:18000:8000"
+  highlevel-simulator:
+    build:
+      context: .
+      dockerfile: backend/simulator/Dockerfile
+    environment:
+      HIGHLEVEL_SIMULATOR_TOKEN: ${HIGHLEVEL_SIMULATOR_TOKEN:-}
+    ports:
+      - "127.0.0.1:18080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
   mailpit:
     image: axllent/mailpit:v1.27.8
     ports:

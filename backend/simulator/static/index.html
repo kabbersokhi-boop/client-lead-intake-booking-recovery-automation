@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>HighLevel Contract Simulator</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Integration engineering test surface</p>
+        <h1>HighLevel Contract Simulator</h1>
+        <p>Implements only the documented API subset exercised by this reference project.</p>
+      </div>
+      <div class="environment-badge">LOCAL TEST ENVIRONMENT — NOT LIVE HIGHLEVEL</div>
+    </header>
+
+    <div class="shell">
+      <nav aria-label="Simulator sections">
+        <button class="nav-item active" data-view="overview">Overview</button>
+        <button class="nav-item" data-view="contacts">Contacts</button>
+        <button class="nav-item" data-view="opportunities">Opportunities / Pipeline</button>
+        <button class="nav-item" data-view="appointments">Appointments</button>
+        <button class="nav-item" data-view="events">API Events</button>
+        <button class="nav-item" data-view="faults">Fault Testing</button>
+      </nav>
+
+      <main>
+        <section id="overview" class="view active">
+          <div class="section-heading">
+            <div><p class="eyebrow">Contract status</p><h2>Local integration overview</h2></div>
+            <button class="secondary" id="refresh">Refresh</button>
+          </div>
+          <div class="notice"><strong>Not a vendor sandbox.</strong> This service uses local-only IDs and synthetic data. It does not contact or impersonate HighLevel.</div>
+          <div class="stats">
+            <article><span>Contacts</span><strong id="contact-count">0</strong></article>
+            <article><span>Opportunities</span><strong id="opportunity-count">0</strong></article>
+            <article><span>Appointments</span><strong id="appointment-count">0</strong></article>
+            <article><span>Armed fault</span><strong id="fault-summary">Normal</strong></article>
+          </div>
+          <div class="grid two">
+            <article class="panel">
+              <h3>Contract profile</h3>
+              <dl id="contract-profile"></dl>
+            </article>
+            <article class="panel">
+              <h3>Recent API activity</h3>
+              <div id="recent-events" class="event-list empty">No adapter calls observed yet.</div>
+            </article>
+          </div>
+        </section>
+
+        <section id="contacts" class="view">
+          <div class="section-heading"><div><p class="eyebrow">External representation</p><h2>Contacts</h2></div></div>
+          <p class="section-copy">Synthetic contacts received over the documented HTTP contract. Select a row to inspect linked local simulator records.</p>
+          <div id="contacts-table" class="panel empty">No contacts have been created.</div>
+          <div id="contact-detail" class="panel detail hidden"></div>
+        </section>
+
+        <section id="opportunities" class="view">
+          <div class="section-heading"><div><p class="eyebrow">Configured project mapping</p><h2>HVAC opportunity pipeline</h2></div></div>
+          <div class="pipeline" id="pipeline"></div>
+          <p class="fine-print">These stage IDs are local simulator configuration, not IDs from a HighLevel account.</p>
+        </section>
+
+        <section id="appointments" class="view">
+          <div class="section-heading"><div><p class="eyebrow">Deliberate boundary</p><h2>Appointments</h2></div></div>
+          <article class="panel boundary-card">
+            <span class="status-pill neutral">Not synchronized in Phase 6</span>
+            <h3>Local booking remains authoritative</h3>
+            <p>The current adapter does not send appointments to this simulator. Adding an unreliable external call inside the existing booking transaction would weaken the approved Phase 2 semantics. Calendar and appointment endpoints are documented as mapping readiness only until a durable lifecycle-sync boundary is designed and live account IDs are available.</p>
+          </article>
+        </section>
+
+        <section id="events" class="view">
+          <div class="section-heading"><div><p class="eyebrow">Sanitized transport evidence</p><h2>API Events</h2></div></div>
+          <p class="section-copy">Only allowlisted contract fields are retained. Authorization and unrelated headers are never recorded.</p>
+          <div id="event-timeline" class="event-list empty">No adapter calls observed yet.</div>
+        </section>
+
+        <section id="faults" class="view">
+          <div class="section-heading"><div><p class="eyebrow">Synthetic one-shot behavior</p><h2>Fault Testing</h2></div></div>
+          <article class="panel">
+            <div class="fault-current">Currently armed: <strong id="fault-current">Normal</strong></div>
+            <div class="fault-grid">
+              <button data-fault="normal">Normal</button>
+              <button data-fault="unauthorized">401 Unauthorized</button>
+              <button data-fault="rate_limited">429 Rate Limited</button>
+              <button data-fault="server_error">500 Server Error</button>
+              <button data-fault="timeout">Timeout</button>
+            </div>
+            <label>Retry-After seconds for the next 429 <input id="retry-after" type="number" min="1" max="30" value="5"></label>
+            <p class="fine-print">A non-normal fault applies to the next authenticated contract request and resets automatically. Controls affect only this local simulator.</p>
+          </article>
+          <article class="panel danger-zone">
+            <h3>Reset isolated simulator data</h3>
+            <p>Clears only simulator contacts, opportunities, events, and armed faults. It does not touch PostgreSQL, n8n, Mailpit, or retained execution evidence.</p>
+            <button class="danger" id="reset">Reset simulator</button>
+          </article>
+        </section>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

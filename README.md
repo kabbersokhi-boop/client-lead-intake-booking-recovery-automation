@@ -2,7 +2,7 @@
 
 A fresh technical-interview capability demonstration for an end-to-end enquiry and booking lifecycle. All example data is synthetic. This is not a production client deployment and does not use a fictional product or client brand.
 
-> Current scope: Phases 1–5 are implemented and verified for a local synthetic reference demo: intake, lifecycle/booking, bounded CRM-write recovery, read-only operations, and a Phase 5 management-reporting boundary live-verified through Make to an upsert-like Google Sheets destination. WhatsApp, real calendar/email providers, and live GoHighLevel integration are not implemented or verified. The CRM boundary remains `DevelopmentCRMProvider`, an explicit development adapter.
+> Current scope: Phases 1–5 and Phase 7A remain preserved. Phase 6 adds a HighLevel-specific adapter contract-tested over real HTTP against a separate local simulator for contact and opportunity behavior. This is not a live HighLevel integration or vendor sandbox. `DevelopmentCRMProvider` remains the safe default and live HighLevel verification is still pending.
 
 ## Architecture
 
@@ -20,14 +20,15 @@ FastAPI CRM Integration Boundary
 PostgreSQL Durable CRM Job + Lead + Pending Follow-up
         ↓
  n8n Follow-up or Booking Workflow
-        ↓
- Development Email → Mailpit
+        ├── Development Email → Mailpit
+        └── Optional HighLevel HTTP adapter → Local Contract Simulator
 ```
 
 - The browser creates a `submission_id`, `correlation_id`, and `received_at` for a pending enquiry. An unchanged retry reuses those values; editing the enquiry deliberately creates a new identity.
 - n8n validates customer input before calling NVIDIA NIM, preserves the source message separately from normalized processing text, validates model output, and explicitly returns 422, 201/200, or a safe 502 response.
 - NVIDIA NIM is used only to extract service context from the original message; it cannot establish availability, bookings, prices, CRM state, or contact details.
-- The FastAPI **development CRM adapter** is a small persistence boundary, not GoHighLevel. `DevelopmentCRMProvider` and the future `GoHighLevelCRMProvider` contract keep n8n independent of the eventual CRM vendor.
+- The FastAPI **development CRM adapter** remains the local persistence boundary, not HighLevel. Optional `highlevel_simulator` mode composes it with a separate HighLevel-specific HTTP adapter; PostgreSQL remains reliability/audit truth.
+- The loopback-only simulator at `http://localhost:18080` implements only the documented contact/opportunity subset used here, validates auth/version/request shapes, shows sanitized API events, and provides one-shot 401/429/500/timeout faults. It is not a HighLevel sandbox.
 - PostgreSQL stores leads, follow-ups, appointments, source and persistence timestamps, and safe audit metadata keyed by correlation ID. Email-capable leads receive one configurable pending follow-up; phone-only leads do not schedule unsupported email work.
 - Every validated lead write is persisted before delivery. The first stored prepared payload remains canonical for creation even if a repeated intake has a different valid AI outcome; persisted CRM state remains canonical for replay. Confirmed writes remain `201`/`200`; unfinished durable work returns `202 queued` without a fabricated CRM ID or booking access.
 - Recovery claims one due job with a lease, reconciles by stable submission identity, obtains shared quota permission, and then completes, retries, blocks, or holds the job for review. Four total automatic writes are allowed by default; manual requeue authorizes one additional operator attempt without deleting history.
@@ -37,14 +38,14 @@ PostgreSQL Durable CRM Job + Lead + Pending Follow-up
 
 ## Run locally
 
-1. Copy `.env.example` to `.env`, using local-only database values. Generate a long random `CRM_ADAPTER_API_KEY`; do not add it, NVIDIA keys, or n8n secrets to Git.
+1. Copy `.env.example` to `.env`, using local-only database values. Generate long, separate random values for `CRM_ADAPTER_API_KEY` and `HIGHLEVEL_SIMULATOR_TOKEN`; do not add them, NVIDIA keys, or n8n secrets to Git. Keep `CRM_PROVIDER_MODE=development` for the original path or use `highlevel_simulator` for the local contract demonstration.
 2. Start PostgreSQL, the FastAPI service, and Mailpit:
 
    ```bash
    docker compose up --build
    ```
 
-   The backend runs migrations before starting and serves the form at [http://localhost:18000](http://localhost:18000). Mailpit is available at [http://localhost:18025](http://localhost:18025). Both web interfaces are loopback-bound; PostgreSQL and SMTP have no host port.
+   The backend runs migrations before starting and serves the form at [http://localhost:18000](http://localhost:18000). Mailpit is available at [http://localhost:18025](http://localhost:18025), and the local contract simulator at [http://localhost:18080](http://localhost:18080). All browser surfaces are loopback-bound; PostgreSQL and SMTP have no host port.
 
 3. Configure the existing n8n instance with protected runtime values, then restart it:
 
@@ -95,7 +96,7 @@ ruff check app tests
 
 Tests use SQLite for fast API/schema tests and disposable PostgreSQL for migration, persistence, and concurrent replay coverage. Node tests execute the exported n8n code-node logic with deterministic fixtures and browser retry helpers. They never call NVIDIA NIM or n8n. Public GitHub Actions provisions PostgreSQL and runs all deterministic tests without secrets.
 
-The established deterministic verifier currently runs 98 Python tests (SQLite and disposable PostgreSQL coverage), 28 frontend/helper tests, and 43 workflow-code/structure tests: 169 total. Live n8n, NVIDIA, Mailpit, and Make checks remain separate evidence rather than silently mocked. The frontend/helper count is not a claim that every check drives a real browser, and the Python count is not a claim that every test is PostgreSQL-specific.
+The established deterministic verifier currently runs 121 Python tests (SQLite and disposable PostgreSQL coverage), 28 frontend/helper tests, and 43 workflow-code/structure tests: 192 total. Live n8n, NVIDIA, Mailpit, Make, and local simulator checks remain separately identified evidence rather than silently mocked. The frontend/helper count is not a claim that every check drives a real browser, and the Python count is not a claim that every test is PostgreSQL-specific.
 
 ## Live verification
 
@@ -106,6 +107,8 @@ Phase 3 evidence and operations are in [docs/phase-3-verification.md](docs/phase
 Open [http://localhost:18000/operations.html](http://localhost:18000/operations.html) for the local, synthetic, read-only operations view. Refresh job-state counts, filter or paste an exact job/submission/correlation UUID, select a job, inspect persisted attempts and incidents, then follow its correlation trace or safely constructed local n8n execution link. The page never sends the adapter key to the browser and cannot claim, retry, requeue, resolve, send, or mutate records. Phase 4 verification and self-review are in [docs/phase-4-verification.md](docs/phase-4-verification.md) and [docs/phase-4-self-review.md](docs/phase-4-self-review.md).
 
 Phase 5 reporting semantics, live Make/Google Sheets evidence, failure isolation, and limitations are recorded in [docs/phase-5-verification.md](docs/phase-5-verification.md) and [docs/phase-5-self-review.md](docs/phase-5-self-review.md). Do not configure the private Make webhook in source-controlled files.
+
+Phase 6 adapter/simulator semantics, current official source record, local evidence, and live-vendor limitations are recorded in [docs/phase-6-verification.md](docs/phase-6-verification.md) and [docs/phase-6-self-review.md](docs/phase-6-self-review.md). Appointment synchronization is deliberately omitted rather than inserted unsafely into the approved booking transaction.
 
 For an interview-ready, browser-first local walkthrough, see [docs/interview-demo-runbook.md](docs/interview-demo-runbook.md). It preserves the retained failure and reporting stories without asking the presenter to recreate faults.
 
