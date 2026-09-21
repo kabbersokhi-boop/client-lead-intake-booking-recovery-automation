@@ -1,19 +1,20 @@
-# End-to-End Lead Intake, CRM Routing, Booking and Failure-Recovery Automation
+# End-to-End HVAC Service Request, Booking and Failure-Recovery Automation
 
 A fresh technical-interview capability demonstration for an end-to-end enquiry and booking lifecycle. All example data is synthetic. This is not a production client deployment and does not use a fictional product or client brand.
 
-> Current scope: Phases 1–5 and Phase 7A remain preserved. Phase 6 adds a HighLevel-specific adapter contract-tested over real HTTP against a separate local simulator for contact and opportunity behavior. This is not a live HighLevel integration or vendor sandbox. `DevelopmentCRMProvider` remains the safe default and live HighLevel verification is still pending.
+> Current scope: Phases 1–6 and Phase 7A are complete for the documented local reference-demo boundary. The pre-7B system polish is complete. The HighLevel-specific adapter is contract-tested over real HTTP against a separate local simulator for contact and opportunity behavior; this is not a live HighLevel integration or vendor sandbox. `DevelopmentCRMProvider` remains the safe default and live HighLevel verification is still pending.
 
 ## Architecture
 
 ```text
-Browser Enquiry Form
+Browser HVAC Service Request
         ↓
   n8n Intake Workflow
         ↓
 Validation / Normalization
         ↓
-NVIDIA NIM Enrichment
+Optional NVIDIA NIM Enrichment
+        └── safe fallback if unavailable/invalid
         ↓
 FastAPI CRM Integration Boundary
         ├── PostgreSQL Durable CRM Job + Lead + Pending Follow-up
@@ -61,19 +62,28 @@ FastAPI CRM Integration Boundary
 
    When n8n is a separate Docker container, attach it to the Compose network and use `http://backend:8000`; this preserves private container-to-container access while both editor and browser-facing backend stay loopback-bound. The CRM write endpoint requires `X-CRM-Adapter-Key`; the workflow supplies it from n8n runtime configuration. The workflow returns CORS headers for `http://localhost:18000` and the browser uses JSON requests with a 30-second configurable acknowledgement timeout.
 
-4. Import the sanitized workflows. Keep management reporting inactive/manual; activate the five
-   customer and recovery workflows listed before it:
+4. Import the sanitized workflows. Preserve their IDs and names because retained execution evidence
+   depends on them. Their interview grouping is:
 
-   - `n8n/lead-intake.json`
-   - `n8n/appointment-booking.json`
-   - `n8n/follow-up-dispatch.json`
-   - `n8n/crm-recovery-error.json`
-   - `n8n/crm-write-recovery.json`
-   - `n8n/management-reporting.json` (manual and inactive until the private Make step)
+   **Customer journey**
+
+   - `Lead Intake - Validation, AI Enrichment and CRM Persistence` (`n8n/lead-intake.json`)
+   - `Lifecycle - Appointment Booking and Confirmation` (`n8n/appointment-booking.json`)
+   - `Lifecycle - Dispatch Due Follow-ups` (`n8n/follow-up-dispatch.json`)
+
+   **Reliability / debugging**
+
+   - `CRM Lead Write Recovery Dispatch` (`n8n/crm-write-recovery.json`)
+   - `CRM Recovery Failure Recorder` (`n8n/crm-recovery-error.json`)
+   - `Controlled CRM Rate-Limit Diagnostic` (`n8n/crm-write-diagnostic.json`, inactive)
+
+   **Management reporting**
+
+   - `Management Reporting - HVAC Snapshot` (`n8n/management-reporting.json`, manual/inactive)
 
    Keep `n8n/crm-write-diagnostic.json` disabled except during the controlled local fault test. Diagnostic and recovery use `phase3-crm-recovery-error` as their error workflow; exports contain this stable local link and no credentials.
 
-   Put the two production webhook URLs in `N8N_WEBHOOK_URL` and `N8N_BOOKING_WEBHOOK_URL`. The workflow exports contain no secrets or credential references. The dispatcher checks every minute; `FOLLOW_UP_DELAY_SECONDS` defaults to a deliberately short 120 seconds so the local demonstration is repeatable. This is a demo delay, not a production contact-time claim.
+   Put the two customer-journey webhook URLs in `N8N_WEBHOOK_URL` and `N8N_BOOKING_WEBHOOK_URL`. The workflow exports contain no secrets or credential references. The dispatcher checks every minute; `FOLLOW_UP_DELAY_SECONDS` defaults to a deliberately short 120 seconds so the local demonstration is repeatable. This is a demo delay, not a production contact-time claim.
 
 5. Submit the form with fictional data, then book from the verified result or let the follow-up become due. Query the complete lifecycle trace:
 
@@ -96,7 +106,7 @@ ruff check app tests
 
 Tests use SQLite for fast API/schema tests and disposable PostgreSQL for migration, persistence, and concurrent replay coverage. Node tests execute the exported n8n code-node logic with deterministic fixtures and browser retry helpers. They never call NVIDIA NIM or n8n. Public GitHub Actions provisions PostgreSQL and runs all deterministic tests without secrets.
 
-The established deterministic verifier currently runs 153 Python tests (SQLite and disposable PostgreSQL coverage), 28 frontend/helper tests, and 43 workflow-code/structure tests: 224 total. Live n8n, NVIDIA, Mailpit, Make, and local simulator checks remain separately identified evidence rather than silently mocked. The frontend/helper count is not a claim that every check drives a real browser, and the Python count is not a claim that every test is PostgreSQL-specific.
+The established deterministic verifier currently runs 153 Python tests (SQLite and disposable PostgreSQL coverage), 32 frontend/helper tests, and 43 workflow-code/structure tests: 228 total. Live n8n, NVIDIA, Mailpit, Make, and local simulator checks remain separately identified evidence rather than silently mocked. The frontend/helper count is not a claim that every check drives a real browser, and the Python count is not a claim that every test is PostgreSQL-specific.
 
 ## Live verification
 
@@ -111,6 +121,8 @@ Phase 5 reporting semantics, live Make/Google Sheets evidence, failure isolation
 Phase 6 adapter/simulator semantics, current official source record, local evidence, and live-vendor limitations are recorded in [docs/phase-6-verification.md](docs/phase-6-verification.md) and [docs/phase-6-self-review.md](docs/phase-6-self-review.md). Appointment synchronization is deliberately omitted rather than inserted unsafely into the approved booking transaction.
 
 For an interview-ready, browser-first local walkthrough, see [docs/interview-demo-runbook.md](docs/interview-demo-runbook.md). It preserves the retained failure and reporting stories without asking the presenter to recreate faults.
+
+The final system-wide review before Phase 7B is recorded in [docs/pre-7b-readiness-review.md](docs/pre-7b-readiness-review.md). Phase 7B remains presentation packaging: manager-facing Sheets polish, the final visual case study, screenshots/redaction, rehearsal, interview Q&A, and the final PDF.
 
 ## Security
 

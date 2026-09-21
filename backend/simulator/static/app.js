@@ -9,16 +9,28 @@ const fieldValue = (record, fieldId) => {
   return field?.value ?? field?.fieldValue ?? "—";
 };
 
+const eventAction = (event) => {
+  if (event.method === "GET" && event.path === "/contacts/lookup") return "Contact lookup";
+  if (event.method === "POST" && event.path === "/contacts/upsert") return "Contact upsert";
+  if (event.method === "GET" && /^\/contacts\/sim_contact_/.test(event.path)) return "Contact verification";
+  if (event.method === "GET" && event.path === "/opportunities/search") return "Opportunity search";
+  if (event.method === "POST" && event.path === "/opportunities/") return "Opportunity create";
+  if (event.method === "PUT" && /^\/opportunities\/sim_opportunity_/.test(event.path)) return "Opportunity update";
+  return "Contract request";
+};
+
 const eventMarkup = (event) => {
   const statusClass = event.status >= 200 && event.status < 300 ? "status-ok" : "status-error";
   const detail = JSON.stringify({
+    action: eventAction(event),
     simulator_request_id: event.requestId,
+    submission_reference: event.submissionReference,
     retry_after: event.retryAfter,
     query: event.query,
     request: event.requestBody,
     response: event.responseBody,
   }, null, 2);
-  return `<details class="event"><summary><span class="method">${escapeText(event.method)}</span><span>${escapeText(event.path)}</span><strong class="${statusClass}">${escapeText(event.status)}</strong><time>${escapeText(new Date(event.timestamp).toLocaleTimeString())}</time></summary><pre>${escapeText(detail)}</pre></details>`;
+  return `<details class="event"><summary><span class="method">${escapeText(event.method)}</span><span class="action">${escapeText(eventAction(event))}</span><span class="path">${escapeText(event.path)}</span><strong class="${statusClass}">${escapeText(event.status)}</strong><time>${escapeText(new Date(event.timestamp).toLocaleTimeString())}</time></summary><pre>${escapeText(detail)}</pre></details>`;
 };
 
 function render() {
@@ -65,22 +77,26 @@ async function refresh() {
   render();
 }
 
-document.querySelectorAll(".nav-item").forEach((button) => button.addEventListener("click", () => {
-  document.querySelectorAll(".nav-item, .view").forEach((element) => element.classList.remove("active"));
-  button.classList.add("active");
-  document.querySelector(`#${button.dataset.view}`).classList.add("active");
-}));
-document.querySelector("#refresh").addEventListener("click", refresh);
-document.querySelectorAll("[data-fault]").forEach((button) => button.addEventListener("click", async () => {
-  await fetch("/simulator/api/fault", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: button.dataset.fault, retry_after: Number(document.querySelector("#retry-after").value) }) });
-  await refresh();
-}));
-document.querySelector("#reset").addEventListener("click", async () => {
-  if (!window.confirm("Reset only the isolated simulator data?")) return;
-  await fetch("/simulator/api/reset", { method: "POST" });
-  document.querySelector("#contact-detail").classList.add("hidden");
-  await refresh();
-});
+if (typeof document !== "undefined") {
+  document.querySelectorAll(".nav-item").forEach((button) => button.addEventListener("click", () => {
+    document.querySelectorAll(".nav-item, .view").forEach((element) => element.classList.remove("active"));
+    button.classList.add("active");
+    document.querySelector(`#${button.dataset.view}`).classList.add("active");
+  }));
+  document.querySelector("#refresh").addEventListener("click", refresh);
+  document.querySelectorAll("[data-fault]").forEach((button) => button.addEventListener("click", async () => {
+    await fetch("/simulator/api/fault", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: button.dataset.fault, retry_after: Number(document.querySelector("#retry-after").value) }) });
+    await refresh();
+  }));
+  document.querySelector("#reset").addEventListener("click", async () => {
+    if (!window.confirm("Reset only the isolated simulator data?")) return;
+    await fetch("/simulator/api/reset", { method: "POST" });
+    document.querySelector("#contact-detail").classList.add("hidden");
+    await refresh();
+  });
 
-refresh();
-setInterval(refresh, 4000);
+  refresh();
+  setInterval(refresh, 4000);
+}
+
+if (typeof module !== "undefined") module.exports = { eventAction, eventMarkup };

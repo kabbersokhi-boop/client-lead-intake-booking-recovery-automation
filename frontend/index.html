@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Service Request Intake | Local Automation Demo</title>
+    <title>HVAC Service Request | Local Automation Demo</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -12,7 +13,7 @@
         <p class="eyebrow">Local automation demonstration</p>
         <div class="hero-heading">
           <div>
-            <h1>Service Request Intake</h1>
+            <h1>HVAC Service Request</h1>
             <p>
               Submit a synthetic heating or cooling service request, then trace its saved
               lifecycle through follow-up or booking.
@@ -29,16 +30,19 @@
           <ol class="steps">
             <li><span>1</span>n8n receives the webhook</li>
             <li><span>2</span>Customer data is validated and normalized</li>
-            <li><span>3</span>NVIDIA NIM extracts structured service context</li>
-            <li><span>4</span>The local development CRM boundary saves the request</li>
-            <li><span>5</span>A follow-up is scheduled for email-capable leads</li>
-            <li><span>6</span>Booking saves the appointment, cancels the follow-up, and sends a local confirmation</li>
+            <li><span>3</span>Optional AI extracts useful service context</li>
+            <li><span>4</span>The validated request is saved in PostgreSQL</li>
+            <li><span>5</span>The lifecycle continues through follow-up or booking</li>
           </ol>
-          <div class="flow" aria-label="Automation flow">
-            <span>Website</span><b>→</b><span>n8n</span><b>→</b><span>AI enrichment</span><b>→</b><span>Saved request</span><b>→</b><span>Mailpit</span>
+          <div class="flow" aria-label="Website request is validated and saved, then branches to follow-up or appointment confirmation">
+            <div class="flow-main"><span>Website</span><b>→</b><span>n8n</span><b>→</b><span>Validate + enrich</span><b>→</b><span>Save request</span></div>
+            <div class="flow-branches">
+              <span><strong>Follow-up</strong><small>Development email → Mailpit</small></span>
+              <span><strong>Appointment saved</strong><small>Confirmation → Mailpit</small></span>
+            </div>
           </div>
           <p class="fallback-note">
-            AI enrichment has a safe fallback; lead intake does not depend on AI availability.
+            Every valid request can be saved when optional AI enrichment times out or returns an invalid result.
           </p>
         </section>
 
@@ -48,7 +52,7 @@
               <p class="eyebrow">Synthetic enquiry</p>
               <h2 id="form-title">Submit a synthetic service request</h2>
             </div>
-            <button id="sample-lead" class="text-button" type="button">Use sample lead</button>
+            <button id="sample-lead" class="text-button" type="button">Load sample request</button>
           </div>
           <form id="enquiry-form" novalidate>
             <label>Full Name<input name="full_name" autocomplete="name" maxlength="160" required /></label>
@@ -67,18 +71,26 @@
               <span id="result-ai-status" class="status-chip"></span>
             </div>
             <dl class="result-grid">
-              <div><dt>Saved request state</dt><dd id="result-intake-state"></dd></div>
-              <div><dt>Correlation ID</dt><dd id="result-correlation-id" class="identifier"></dd></div>
-              <div><dt>Saved CRM lead ID</dt><dd id="result-crm-lead-id" class="identifier"></dd></div>
               <div><dt>Request status</dt><dd id="result-pipeline-stage"></dd></div>
               <div><dt>Follow-up</dt><dd id="result-follow-up-status"></dd></div>
               <div><dt>Follow-up due</dt><dd id="result-follow-up-due"></dd></div>
             </dl>
+            <details class="result-technical">
+              <summary>Technical details</summary>
+              <dl class="result-grid">
+                <div><dt>Submission ID</dt><dd id="result-submission-id" class="identifier"></dd></div>
+                <div><dt>Correlation ID</dt><dd id="result-correlation-id" class="identifier"></dd></div>
+                <div><dt>CRM lead ID</dt><dd id="result-crm-lead-id" class="identifier"></dd></div>
+                <div><dt>AI outcome</dt><dd id="result-ai-outcome" class="identifier"></dd></div>
+                <div><dt>Intake state</dt><dd id="result-intake-state" class="identifier"></dd></div>
+                <div><dt>Pipeline stage</dt><dd id="result-raw-pipeline-stage" class="identifier"></dd></div>
+              </dl>
+            </details>
             <button id="inspect-trace" class="secondary" type="button">Inspect persisted trace</button>
             <section id="booking-panel" class="booking-panel" hidden>
               <p class="result-kicker">Next lifecycle step</p>
               <h3>Save a demonstration appointment</h3>
-              <p>Times are entered and displayed in Surrey business time (America/Vancouver).</p>
+              <p>Times use Surrey business time (America/Vancouver). The appointment is saved in local PostgreSQL and does not reserve a technician or update an external calendar.</p>
               <p id="booking-customer-reference" class="booking-customer-reference"></p>
               <form id="booking-form">
                 <label>Appointment date and time<input id="appointment-local" name="appointment_local" type="datetime-local" required /></label>
@@ -88,12 +100,20 @@
               <article id="booking-result" class="booking-result" hidden>
                 <h3 id="booking-result-title"></h3>
                 <dl class="result-grid">
-                  <div><dt>Appointment ID</dt><dd id="booking-appointment-id" class="identifier"></dd></div>
                   <div><dt>Appointment time</dt><dd id="booking-appointment-time"></dd></div>
-                  <div><dt>Pipeline stage</dt><dd id="booking-pipeline-stage"></dd></div>
+                  <div><dt>Request status</dt><dd id="booking-pipeline-stage"></dd></div>
                   <div><dt>Follow-up</dt><dd id="booking-follow-up-status"></dd></div>
-                  <div><dt>Confirmation email</dt><dd id="booking-confirmation-state"></dd></div>
+                  <div><dt>Development email</dt><dd id="booking-confirmation-state"></dd></div>
                 </dl>
+                <details class="result-technical">
+                  <summary>Technical details</summary>
+                  <dl class="result-grid">
+                    <div><dt>Appointment ID</dt><dd id="booking-appointment-id" class="identifier"></dd></div>
+                    <div><dt>Booking request ID</dt><dd id="booking-request-id" class="identifier"></dd></div>
+                    <div><dt>Pipeline stage</dt><dd id="booking-raw-pipeline-stage" class="identifier"></dd></div>
+                    <div><dt>Confirmation state</dt><dd id="booking-raw-confirmation-state" class="identifier"></dd></div>
+                  </dl>
+                </details>
               </article>
             </section>
           </section>
@@ -106,7 +126,7 @@
             <p class="eyebrow">Verification</p>
             <h2 id="trace-title">Saved request trace</h2>
           </div>
-          <p>Inspect lead, follow-up, appointment, and safe audit state by correlation ID.</p>
+          <p>See the customer journey first, then expand durable identifiers and audit truth.</p>
         </div>
         <form id="trace-form" class="trace-form">
           <label>Correlation ID<input id="trace-id" name="correlation_id" autocomplete="off" required /></label>
@@ -116,7 +136,11 @@
           <div id="trace-summary"></div>
           <details id="technical-details" hidden>
             <summary>Technical details</summary>
-            <pre id="trace-raw"></pre>
+            <dl id="trace-technical-grid" class="trace-grid technical-grid"></dl>
+            <details class="raw-trace">
+              <summary>Raw trace JSON</summary>
+              <pre id="trace-raw"></pre>
+            </details>
           </details>
         </div>
       </section>

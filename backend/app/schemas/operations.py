@@ -24,6 +24,8 @@ class OperationsSummary(BaseModel):
     observed_at: datetime
     job_counts: CurrentJobCounts
     open_incident_count: int
+    open_linked_incident_count: int
+    open_unlinked_incident_count: int
 
 
 class OperationsJobListItem(BaseModel):

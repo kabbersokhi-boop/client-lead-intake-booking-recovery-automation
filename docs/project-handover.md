@@ -8,13 +8,15 @@ Future phases must update this document before their final commit so the reposit
 
 - Review date: 2026-09-22.
 - Phase 6 fallback starts from approved Phase 7A checkpoint `bfc4d88dbfb291b2dbcb52eb77e2ab6c2a13dd1b`.
-- The senior Phase 6 correction pass starts from approved checkpoint
-  `9879a9621ae0aee94c231af5bfbf5350f5dec20f`; the exact final correction SHA belongs in the
-  final report rather than creating a self-referential documentation commit.
+- Approved Phase 6 correction checkpoint: `ffa877ffd88adaba53695a03e0a3ac68cb4010fd`
+  (`Harden Phase 6 identity and simulator boundaries`). Exact-SHA Backend CI run `35645604249`
+  succeeded.
+- The pre-7B system-wide readiness pass starts from that clean checkpoint. Its exact final SHA and
+  exact-SHA CI belong in the completion report rather than a self-referential documentation commit.
 - Phase 6 implements a separate HighLevel HTTP adapter and loopback-only local contract simulator
   for the documented contact/opportunity subset. It is not a live integration or vendor sandbox.
-- Phase 6 deterministic verification: 153 Python tests, 28 frontend/helper tests, and 43
-  workflow tests (224 total), plus Ruff, simulator JavaScript/JSON/shell syntax, Compose
+- Current deterministic verification: 153 Python tests, 32 frontend/helper tests, and 43
+  workflow tests (228 total), plus Ruff, simulator JavaScript/JSON/shell syntax, Compose
   validation, `git diff --check`, and tracked-content secret scanning.
 - Phase 7A presentation-hardening implementation SHA: `235d1f55156820a1aa0a0b7416bf6a44a3533e4f`.
 - Phase 7A deterministic verification: 98 Python tests, 28 frontend/helper tests, and 43
@@ -38,8 +40,11 @@ Future phases must update this document before their final commit so the reposit
   visibly without changing customer-critical durable counts. See
   `docs/phase-5-verification.md` for exact evidence and limitations.
 - Phase 6 local fallback is implemented and live-local verified. Live HighLevel authentication,
-  account mappings, responses, and effects remain unverified. Phase 7B screenshots, final case
-  study, browser rehearsal, and final interview PDF remain incomplete.
+  account mappings, responses, and effects remain unverified. The pre-7B polish clarifies the
+  business-first request/booking/trace journey, historical diagnostic incidents, workflow groups,
+  truthful email wording, and simulator API-event sequence without changing durable semantics.
+  Phase 7B screenshots, final case study, browser rehearsal, and final interview PDF remain
+  incomplete.
 - Approval does not assert universal bug freedom, production readiness, or a guaranteed hiring outcome.
 
 Before new work, verify that current `HEAD`, `origin/main`, the worktree, runtime, and CI still match the intended starting point. Do not assume this recorded SHA is still current.
@@ -154,6 +159,25 @@ verified CRM completion. It does not provide an arbitrary dismiss action. Theref
   outside customer-critical transaction ownership and has no database credentials.
 
 Preserve the separation that n8n owns customer-critical intake, booking, and recovery, while Make handles downstream management/reporting. A reporting failure must not undo a lead, block booking, or alter recovery truth.
+
+### Current project workflow states
+
+The preserved n8n runtime also contains unrelated workflows. The seven workflows owned by this
+project are grouped below; preserve their IDs and names because retained execution evidence refers
+to them.
+
+**Active customer/reliability workflows**
+
+- `GKMASmZ5xo0UaWUY` — `Lead Intake - Validation, AI Enrichment and CRM Persistence`
+- `phase2-appointment-booking` — `Lifecycle - Appointment Booking and Confirmation`
+- `phase2-follow-up-dispatch` — `Lifecycle - Dispatch Due Follow-ups`
+- `phase3-crm-write-recovery` — `CRM Lead Write Recovery Dispatch`
+- `phase3-crm-recovery-error` — `CRM Recovery Failure Recorder`
+
+**Intentionally inactive/manual workflows**
+
+- `phase3-crm-write-diagnostic` — `Controlled CRM Rate-Limit Diagnostic`
+- `phase5-management-reporting` — `Management Reporting - HVAC Snapshot`
 
 ## Honesty and security boundaries
 
@@ -288,6 +312,31 @@ and appointment synchronization are not wired.
 The remaining Phase 7B work is screenshot selection/redaction, Google Sheets dashboard polish,
 final README case-study polish, browser rehearsal, and rebuilding the final interview PDF. Do not
 treat those deliverables as complete.
+
+### Pre-7B system polish status
+
+The system-wide readiness pass is complete for the implemented local boundary:
+
+- The service-request page now presents saved request, follow-up, appointment, and notification
+  outcomes before raw IDs/states; technical details and raw trace JSON remain expandable.
+- The lifecycle diagram now branches after persistence instead of implying every intake sends an
+  immediate email. Booking copy explicitly distinguishes local PostgreSQL state from technician
+  capacity or external-calendar synchronization.
+- Trace audit events have business-readable labels while retaining raw event types. Operations
+  preserves technical depth, displays both human and raw job states, and distinguishes linked
+  open recovery work from unlinked historical records. Executions `272` and `276` remain open and
+  unchanged.
+- Appointment email HTML now says **Saved appointment details**, consistent with its subject/body.
+- Simulator API Events label contact lookup/upsert/verification and opportunity search/create,
+  while the environment badge explicitly says local test environment, not live HighLevel, and not
+  a HighLevel sandbox. Appointment synchronization remains visibly unimplemented.
+- Desktop and 390-pixel browser review covers the main page, populated trace, Operations, all
+  simulator sections, and retained Mailpit messages. No customer-critical or external integration
+  was invoked to produce polish evidence.
+
+See `docs/pre-7b-readiness-review.md` for the complete gate record. This pass did not build the
+manager-facing Google Sheets dashboard, final visual README, final screenshot set, timed rehearsal,
+interview Q&A package, or final PDF.
 
 ### HVAC business wording and email polish
 

@@ -3,6 +3,14 @@
 
   const states = ["pending", "processing", "retry_wait", "completed", "blocked", "needs_review"];
   const incidentStates = ["open", "resolved"];
+  const stateLabels = {
+    pending: "Pending",
+    processing: "Processing",
+    retry_wait: "Waiting to retry",
+    completed: "Completed",
+    blocked: "Blocked",
+    needs_review: "Needs review",
+  };
   const timeoutMs = 8000;
   const superseded = "operations-request-superseded";
   const timedOut = "operations-request-timed-out";
@@ -63,7 +71,7 @@
   }
 
   function validateSummary(data) {
-    if (!isObject(data) || !isTimestamp(data.observed_at) || !isObject(data.job_counts) || !isCount(data.open_incident_count)) throw invalidResponse();
+    if (!isObject(data) || !isTimestamp(data.observed_at) || !isObject(data.job_counts) || !isCount(data.open_incident_count) || !isCount(data.open_linked_incident_count) || !isCount(data.open_unlinked_incident_count) || data.open_linked_incident_count + data.open_unlinked_incident_count !== data.open_incident_count) throw invalidResponse();
     for (const state of states) if (!isCount(data.job_counts[state])) throw invalidResponse();
     return data;
   }
@@ -220,14 +228,19 @@
       states.forEach((state) => {
         const card = document.createElement("div");
         const label = document.createElement("span");
+        const raw = document.createElement("code");
         const count = document.createElement("strong");
-        label.textContent = state;
+        label.textContent = stateLabels[state];
+        raw.textContent = state;
         count.textContent = String(data.job_counts[state]);
-        card.append(label, count);
+        card.append(label, raw, count);
         root.append(card);
       });
       summaryObservedAt = data.observed_at;
-      $("incident-count").textContent = `Open recovery incidents: ${data.open_incident_count}`;
+      $("incident-count").textContent = `Open incident records: ${data.open_incident_count} · linked to durable work: ${data.open_linked_incident_count} · unlinked: ${data.open_unlinked_incident_count}`;
+      $("incident-context").textContent = data.open_unlinked_incident_count
+        ? "Unlinked open records are preserved diagnostic/debugging evidence; they do not identify unresolved customer requests."
+        : "Every open incident is linked to durable recovery work.";
       $("summary-status").className = "operations-status";
       $("summary-status").textContent = `Observed ${formatTime(data.observed_at)}. Separate requests can observe later worker progress.`;
     } catch (error) {
@@ -274,7 +287,14 @@
     }
     data.items.forEach((job) => {
       const row = document.createElement("tr");
-      jobCell(row, job.state, `job-state job-state--${job.state}`);
+      const stateCell = document.createElement("td");
+      const stateLabel = document.createElement("strong");
+      const rawState = document.createElement("code");
+      stateLabel.className = `job-state job-state--${job.state}`;
+      stateLabel.textContent = stateLabels[job.state];
+      rawState.textContent = job.state;
+      stateCell.append(stateLabel, document.createElement("br"), rawState);
+      row.append(stateCell);
       const ref = document.createElement("td");
       const select = document.createElement("button");
       select.type = "button";
@@ -363,8 +383,11 @@
     const item = document.createElement("li");
     const title = document.createElement("strong");
     const text = document.createElement("span");
-    title.textContent = `${entry.state}: ${entry.error_class || "recorded error"}`;
-    text.textContent = `${entry.linked ? "linked" : "unlinked"} · recorded ${formatTime(entry.created_at)}${entry.resolved_at ? ` · resolved ${formatTime(entry.resolved_at)}` : ""}${entry.failed_node ? ` · node ${entry.failed_node}` : ""}`;
+    const historicalDiagnostic = !entry.linked && entry.workflow_reference === "phase3-crm-write-diagnostic";
+    title.textContent = historicalDiagnostic
+      ? `Historical diagnostic record — ${entry.state}`
+      : `${entry.state}: ${entry.error_class || "recorded error"}`;
+    text.textContent = `${historicalDiagnostic ? "unlinked; no durable customer/recovery job was created" : entry.linked ? "linked to durable recovery work" : "unlinked"} · ${entry.error_class || "recorded error"} · recorded ${formatTime(entry.created_at)}${entry.resolved_at ? ` · resolved ${formatTime(entry.resolved_at)}` : ""}${entry.failed_node ? ` · node ${entry.failed_node}` : ""}`;
     item.append(title, text);
     execution(item, entry.workflow_reference, entry.execution_reference, entry.execution_url);
     return item;
@@ -380,7 +403,7 @@
     root.append(observed);
     const fields = document.createElement("dl");
     fields.className = "trace-grid";
-    [["Job ID", data.id], ["Submission ID", data.submission_id], ["Correlation ID", data.correlation_id], ["Operation", data.operation_kind], ["Current state", data.state], ["Created (UTC)", formatTime(data.created_at)], ["Updated (UTC)", formatTime(data.updated_at)], ["Actual CRM write attempts", String(data.attempt_count)], ["Reconciliation failures", String(data.reconciliation_failure_count)], ["Next eligible retry (UTC)", formatTime(data.next_eligible_at)], ["Last recorded error", [data.last_error_class, data.last_error_message].filter(Boolean).join(": ") || "None"], ["CRM lead", data.completed_lead ? `${data.completed_lead.id} (${data.completed_lead.full_name}; ${data.completed_lead.pipeline_stage})` : "Pending CRM creation"], ["Lease", data.lease_expired_at_observation ? "Recorded lease was expired at observation time" : "No expired recorded lease observed"]].forEach(([label, value]) => field(fields, label, value));
+    [["Job ID", data.id], ["Submission ID", data.submission_id], ["Correlation ID", data.correlation_id], ["Operation", data.operation_kind], ["Current state", `${stateLabels[data.state]} (${data.state})`], ["Created (UTC)", formatTime(data.created_at)], ["Updated (UTC)", formatTime(data.updated_at)], ["Actual CRM write attempts", String(data.attempt_count)], ["Reconciliation failures", String(data.reconciliation_failure_count)], ["Next eligible retry (UTC)", formatTime(data.next_eligible_at)], ["Last recorded error", [data.last_error_class, data.last_error_message].filter(Boolean).join(": ") || "None"], ["CRM lead", data.completed_lead ? `${data.completed_lead.id} (${data.completed_lead.full_name}; ${data.completed_lead.pipeline_stage})` : "Pending CRM creation"], ["Lease", data.lease_expired_at_observation ? "Recorded lease was expired at observation time" : "No expired recorded lease observed"]].forEach(([label, value]) => field(fields, label, value));
     root.append(fields);
     const trace = document.createElement("a");
     trace.href = `/index.html?trace=${encodeURIComponent(data.correlation_id)}`;

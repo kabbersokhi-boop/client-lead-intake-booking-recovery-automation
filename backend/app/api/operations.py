@@ -139,15 +139,26 @@ def operations_summary(db: Session = Depends(get_db)) -> OperationsSummary:
     ):
         if state in counts:
             counts[state] = count
+    open_incident_count = db.scalar(
+        select(func.count())
+        .select_from(RecoveryIncident)
+        .where(RecoveryIncident.state == "open")
+    ) or 0
+    linked_condition = or_(
+        RecoveryIncident.job_id.in_(select(CRMWriteJob.id)),
+        RecoveryIncident.correlation_id.in_(select(CRMWriteJob.correlation_id)),
+    )
+    open_linked_incident_count = db.scalar(
+        select(func.count())
+        .select_from(RecoveryIncident)
+        .where(RecoveryIncident.state == "open", linked_condition)
+    ) or 0
     return OperationsSummary(
         observed_at=_observed_at(),
         job_counts=CurrentJobCounts(**counts),
-        open_incident_count=db.scalar(
-            select(func.count())
-            .select_from(RecoveryIncident)
-            .where(RecoveryIncident.state == "open")
-        )
-        or 0,
+        open_incident_count=open_incident_count,
+        open_linked_incident_count=open_linked_incident_count,
+        open_unlinked_incident_count=open_incident_count - open_linked_incident_count,
     )
 
 

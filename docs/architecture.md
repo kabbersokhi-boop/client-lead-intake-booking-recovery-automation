@@ -1,4 +1,4 @@
-# Phase 1–3 architecture
+# Current reference architecture
 
 ## Responsibilities
 
@@ -16,9 +16,9 @@
 | Mailpit | Accepts local development SMTP messages and exposes them on a loopback web UI. It is not an external email provider. |
 | Operations read projection | Exposes allowlisted summaries, paged jobs, job detail, and incidents from the same local PostgreSQL records. It does not invoke recovery actions or external services. |
 
-## Demonstration lead source
+## Demonstration service-request source
 
-The browser form is one controlled website lead source used to make the live
+The browser form is one controlled website service-request source used to make the live
 demonstration repeatable during an interview. It is not presented as a complete
 home-services website or a production client deployment.
 

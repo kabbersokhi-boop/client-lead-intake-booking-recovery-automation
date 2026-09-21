@@ -7,9 +7,11 @@ const {
   bookingPendingFor,
   bookingView,
   confirmationIsSettled,
+  labelFor,
   pendingFor,
   queuedView,
   successView,
+  serviceLabel,
   traceView,
   verifiedBooking,
   verifiedSuccess,
@@ -70,12 +72,16 @@ test("only the documented intake contract confirms browser success", () => {
   assert.deepEqual(successView(valid, payload), {
     title: "Request saved",
     intakeState: "created",
+    submissionId: payload.submission_id,
     correlationId: payload.correlation_id,
     crmLeadId: valid.crm_lead_id,
     aiStatus: "enriched",
+    aiStatusLabel: "Enriched",
     aiStatusTone: "success",
-    pipelineStage: "new_lead",
-    followUpStatus: "pending",
+    pipelineStage: "New request",
+    rawPipelineStage: "new_lead",
+    followUpStatus: "Scheduled",
+    rawFollowUpStatus: "pending",
     followUpDueAt: "2026-09-19T00:02:00Z",
   });
   assert.equal(verifiedSuccess({}, payload), false);
@@ -133,8 +139,10 @@ test("pending trace is distinct from an old successful CRM card", () => {
     audit_events: [],
   });
   assert.equal(view.pending, true);
-  assert.equal(view.pipelineStage, "not created");
-  assert.equal(view.recoveryState, "retry_wait");
+  assert.equal(view.pipelineStage, "Waiting to be saved");
+  assert.equal(view.rawPipelineStage, "not_created");
+  assert.equal(view.recoveryState, "Waiting to retry");
+  assert.equal(view.rawRecoveryState, "retry_wait");
   assert.equal(traceView({ lead: null, recovery_jobs: [] }), null);
 });
 
@@ -159,11 +167,13 @@ test("trace view prioritizes useful persisted lead fields", () => {
   });
 
   assert.equal(view.customer, "Maya Verma");
-  assert.equal(view.serviceType, "furnace_service");
+  assert.equal(view.serviceType, "Furnace service");
+  assert.equal(view.rawServiceType, "furnace_service");
   assert.equal(view.needsReview, false);
   assert.equal(view.audits.length, 1);
-  assert.equal(view.followUpStatus, "pending");
-  assert.equal(view.bookingStatus, "not booked");
+  assert.equal(view.followUpStatus, "Scheduled");
+  assert.equal(view.rawFollowUpStatus, "pending");
+  assert.equal(view.bookingStatus, "Not booked");
   assert.equal(traceView({ lead: null }), null);
 });
 
@@ -206,7 +216,8 @@ test("booking success requires the verified lifecycle response", () => {
   };
 
   assert.equal(verifiedBooking(body, payload), true);
-  assert.equal(bookingView(body, payload).followUpStatus, "cancelled");
+  assert.equal(bookingView(body, payload).followUpStatus, "Cancelled after booking");
+  assert.equal(bookingView(body, payload).confirmationStateLabel, "Sent to the development inbox");
   assert.equal(verifiedBooking({ ...body, pipeline_stage: "new_lead" }, payload), false);
   assert.equal(verifiedBooking({ ...body, appointment_at: undefined }, payload), false);
   assert.equal(verifiedBooking({ ...body, appointment_at: "2026-10-20Z" }, payload), false);
@@ -310,4 +321,11 @@ test("trace view clearly marks fallback records needing review", () => {
   });
 
   assert.equal(view.needsReview, true);
+});
+
+test("presentation labels make raw states readable without discarding them", () => {
+  assert.equal(labelFor("pipeline", "appointment_booked"), "Appointment saved");
+  assert.equal(labelFor("recovery", "retry_wait"), "Waiting to retry");
+  assert.equal(labelFor("recovery", "future_state"), "Future state");
+  assert.equal(serviceLabel("air_conditioning_service"), "Air conditioning service");
 });

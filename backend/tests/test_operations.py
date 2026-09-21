@@ -90,6 +90,12 @@ def test_operations_summary_filters_pagination_and_allowlisted_detail(client, db
                 error_class="adapter-key-canary",
                 state="open", created_at=now,
             ),
+            RecoveryIncident(
+                id=uuid.uuid4(), event_key="historical-diagnostic", job_id=None,
+                correlation_id=None, workflow_reference="phase3-crm-write-diagnostic",
+                execution_reference="272", failed_node="Validate Prepared Backlog",
+                error_class="WrappedExecutionError", state="open", created_at=now,
+            ),
         ]
     )
     db.commit()
@@ -100,7 +106,9 @@ def test_operations_summary_filters_pagination_and_allowlisted_detail(client, db
         "pending": 1, "processing": 0, "retry_wait": 1, "completed": 1,
         "blocked": 0, "needs_review": 0,
     }
-    assert summary.json()["open_incident_count"] == 1
+    assert summary.json()["open_incident_count"] == 2
+    assert summary.json()["open_linked_incident_count"] == 1
+    assert summary.json()["open_unlinked_incident_count"] == 1
 
     listed = client.get("/api/operations/jobs?page_size=2")
     assert listed.status_code == 200

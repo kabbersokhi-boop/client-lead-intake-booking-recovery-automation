@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>HighLevel Contract Simulator</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
@@ -13,7 +14,7 @@
         <h1>HighLevel Contract Simulator</h1>
         <p>Implements only the documented API subset exercised by this reference project.</p>
       </div>
-      <div class="environment-badge">LOCAL TEST ENVIRONMENT — NOT LIVE HIGHLEVEL</div>
+      <div class="environment-badge"><span>LOCAL TEST ENVIRONMENT</span><span>NOT LIVE HIGHLEVEL</span><span>NOT A HIGHLEVEL SANDBOX</span></div>
     </header>
 
     <div class="shell">
@@ -54,7 +55,7 @@
         <section id="contacts" class="view">
           <div class="section-heading"><div><p class="eyebrow">External representation</p><h2>Contacts</h2></div></div>
           <p class="section-copy">Synthetic contacts received over the documented HTTP contract. Select a row to inspect linked local simulator records.</p>
-          <div id="contacts-table" class="panel empty">No contacts have been created.</div>
+          <div id="contacts-table" class="panel table-scroll empty" tabindex="0" aria-label="Simulator contacts; scroll horizontally for all columns">No contacts have been created.</div>
           <div id="contact-detail" class="panel detail hidden"></div>
         </section>
 
@@ -69,13 +70,14 @@
           <article class="panel boundary-card">
             <span class="status-pill neutral">Not synchronized in Phase 6</span>
             <h3>Local booking remains authoritative</h3>
-            <p>The current adapter does not send appointments to this simulator. Adding an unreliable external call inside the existing booking transaction would weaken the approved Phase 2 semantics. Calendar and appointment endpoints are documented as mapping readiness only until a durable lifecycle-sync boundary is designed and live account IDs are available.</p>
+            <p>Appointment synchronization is intentionally not implemented. The demonstration saves booking state in local PostgreSQL; it does not update a HighLevel calendar or reserve external capacity.</p>
+            <details><summary>Engineering rationale</summary><p>Reliable post-booking projection needs its own durable synchronization owner. An external HTTP call was not inserted into the approved booking transaction, and live calendar/account IDs have not been verified.</p></details>
           </article>
         </section>
 
         <section id="events" class="view">
           <div class="section-heading"><div><p class="eyebrow">Sanitized transport evidence</p><h2>API Events</h2></div></div>
-          <p class="section-copy">Only allowlisted contract fields are retained. Authorization and unrelated headers are never recorded.</p>
+          <p class="section-copy">Action labels make lookup, upsert, verification, opportunity search, and creation easy to trace. Expanded events contain only allowlisted contract fields; Authorization and unrelated headers are never recorded.</p>
           <div id="event-timeline" class="event-list empty">No adapter calls observed yet.</div>
         </section>
 
@@ -91,7 +93,7 @@
               <button data-fault="timeout">Timeout</button>
             </div>
             <label>Retry-After seconds for the next 429 <input id="retry-after" type="number" min="1" max="30" value="5"></label>
-            <p class="fine-print">A non-normal fault applies to the next authenticated contract request and resets automatically. Controls affect only this local simulator.</p>
+            <p class="fine-print">Arming a fault does not invoke the adapter. A non-normal mode applies once to the next authenticated contract request, then resets automatically. Controls affect only this local simulator.</p>
           </article>
           <article class="panel danger-zone">
             <h3>Reset isolated simulator data</h3>

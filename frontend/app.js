@@ -5,10 +5,13 @@ const sampleLeadButton = document.querySelector("#sample-lead");
 const intakeResult = document.querySelector("#intake-result");
 const resultTitle = document.querySelector("#result-title");
 const resultIntakeState = document.querySelector("#result-intake-state");
+const resultSubmissionId = document.querySelector("#result-submission-id");
 const resultCorrelationId = document.querySelector("#result-correlation-id");
 const resultCrmLeadId = document.querySelector("#result-crm-lead-id");
 const resultAiStatus = document.querySelector("#result-ai-status");
+const resultAiOutcome = document.querySelector("#result-ai-outcome");
 const resultPipelineStage = document.querySelector("#result-pipeline-stage");
+const resultRawPipelineStage = document.querySelector("#result-raw-pipeline-stage");
 const resultFollowUpStatus = document.querySelector("#result-follow-up-status");
 const resultFollowUpDue = document.querySelector("#result-follow-up-due");
 const inspectTraceButton = document.querySelector("#inspect-trace");
@@ -20,14 +23,18 @@ const bookingStatus = document.querySelector("#booking-status");
 const bookingResult = document.querySelector("#booking-result");
 const bookingResultTitle = document.querySelector("#booking-result-title");
 const bookingAppointmentId = document.querySelector("#booking-appointment-id");
+const bookingRequestId = document.querySelector("#booking-request-id");
 const bookingAppointmentTime = document.querySelector("#booking-appointment-time");
 const bookingPipelineStage = document.querySelector("#booking-pipeline-stage");
+const bookingRawPipelineStage = document.querySelector("#booking-raw-pipeline-stage");
 const bookingFollowUpStatus = document.querySelector("#booking-follow-up-status");
 const bookingConfirmationState = document.querySelector("#booking-confirmation-state");
+const bookingRawConfirmationState = document.querySelector("#booking-raw-confirmation-state");
 const traceForm = document.querySelector("#trace-form");
 const traceId = document.querySelector("#trace-id");
 const traceSummary = document.querySelector("#trace-summary");
 const technicalDetails = document.querySelector("#technical-details");
+const traceTechnicalGrid = document.querySelector("#trace-technical-grid");
 const traceRaw = document.querySelector("#trace-raw");
 const pendingStorageKey = "lead-intake-pending-v1";
 const pendingBookingStorageKey = "lead-booking-pending-v1";
@@ -98,6 +105,7 @@ function beginNewIntakeAttempt() {
   bookingCustomerReference.textContent = "";
   traceSummary.replaceChildren();
   technicalDetails.hidden = true;
+  traceTechnicalGrid.replaceChildren();
   traceRaw.textContent = "";
   traceId.value = "";
 }
@@ -107,12 +115,15 @@ function renderVerifiedResult(body, payload) {
   if (!view) return false;
   resultTitle.textContent = view.title;
   resultIntakeState.textContent = view.intakeState;
+  resultSubmissionId.textContent = view.submissionId;
   resultCorrelationId.textContent = view.correlationId;
   resultCrmLeadId.textContent = view.crmLeadId;
   resultPipelineStage.textContent = view.pipelineStage;
+  resultRawPipelineStage.textContent = view.rawPipelineStage;
   resultFollowUpStatus.textContent = view.followUpStatus;
   resultFollowUpDue.textContent = formatBusinessTime(view.followUpDueAt);
-  resultAiStatus.textContent = `AI: ${view.aiStatus}`;
+  resultAiStatus.textContent = `AI: ${view.aiStatusLabel}`;
+  resultAiOutcome.textContent = view.aiStatus;
   resultAiStatus.className = `status-chip status-chip--${view.aiStatusTone}`;
   lifecycleUiState = window.LeadIntake.acceptIntakeResult({
     correlationId: view.correlationId,
@@ -135,12 +146,15 @@ function renderQueuedResult(body, payload) {
   if (!view) return false;
   resultTitle.textContent = view.title;
   resultIntakeState.textContent = view.intakeState;
+  resultSubmissionId.textContent = payload.submission_id;
   resultCorrelationId.textContent = view.correlationId;
   resultCrmLeadId.textContent = "Pending — no saved CRM lead exists yet";
-  resultPipelineStage.textContent = "not saved yet";
-  resultFollowUpStatus.textContent = "not scheduled";
+  resultPipelineStage.textContent = "Waiting to be saved";
+  resultRawPipelineStage.textContent = "not_created";
+  resultFollowUpStatus.textContent = "Not scheduled";
   resultFollowUpDue.textContent = "Not applicable";
-  resultAiStatus.textContent = `Recovery: ${view.recoveryState}`;
+  resultAiStatus.textContent = view.recoveryStateLabel;
+  resultAiOutcome.textContent = "Inspect after persistence";
   resultAiStatus.className = "status-chip status-chip--warning";
   intakeResult.hidden = false;
   bookingPanel.hidden = true;
@@ -162,6 +176,7 @@ function renderTrace(trace) {
   const view = window.LeadIntake.traceView(trace);
   traceSummary.replaceChildren();
   technicalDetails.hidden = true;
+  traceTechnicalGrid.replaceChildren();
   traceRaw.textContent = "";
   if (!view) throw new Error("The enquiry has not been persisted yet. Try again shortly.");
 
@@ -170,47 +185,69 @@ function renderTrace(trace) {
   const heading = document.createElement("h3");
   heading.textContent = view.customer;
   const subtitle = document.createElement("p");
-  subtitle.textContent = "Saved in the local development CRM boundary";
+  subtitle.textContent = view.pending
+    ? "The durable recovery boundary has accepted this request."
+    : "Business outcome from persisted PostgreSQL state.";
   const fields = document.createElement("dl");
   fields.className = "trace-grid";
   [
-    ["Contact", view.contact],
     ["Request status", view.pipelineStage],
-    ["Service request", view.serviceType],
-    ["Urgency", view.urgency],
-    ["Preferred time", view.preferredTime],
-    ["AI enrichment", view.aiStatus],
-    ["Needs review", view.needsReview ? "Yes — review required" : "No"],
-    ["Received from form", view.clientReceivedAt],
-    ["Saved at", view.persistedAt],
-    ["Follow-up status", view.followUpStatus],
-    ["Follow-up due", formatBusinessTime(view.followUpDueAt)],
-    ["Follow-up completed", formatBusinessTime(view.followUpCompletedAt)],
-    ["Appointment status", view.bookingStatus],
-    ["Appointment ID", view.appointmentId],
+    ["Service", view.serviceType],
+    ["Location", view.location],
+    ["Follow-up", view.followUpStatus],
+    ["Appointment", view.bookingStatus],
     ["Appointment time", formatBusinessTime(view.appointmentAt, view.appointmentTimezone)],
-    ["Confirmation sent", formatBusinessTime(view.confirmationSentAt)],
-    ["Recovery state", view.recoveryState],
-    ["Recovery job", view.recoveryJobId],
+    ["Customer notification", view.confirmationSentAt === "Not sent" ? "Not sent" : "Sent to the development inbox"],
   ].forEach(([label, value]) => appendTraceField(fields, label, value));
   overview.append(heading, subtitle, fields);
 
   const auditHeading = document.createElement("h4");
   auditHeading.className = "audit-heading";
-  auditHeading.textContent = `Audit events (${view.audits.length})`;
+  auditHeading.textContent = `Customer journey (${view.audits.length} recorded events)`;
   const audits = document.createElement("ul");
   audits.className = "audit-list";
   view.audits.forEach((event) => {
     const item = document.createElement("li");
     const label = document.createElement("strong");
     const timestamp = document.createElement("span");
-    label.textContent = `${event.event_type || "event"} · ${event.status || "unknown"}`;
+    const eventLabels = {
+      "crm.lead_created": "Request received and saved",
+      "follow_up.scheduled": "Follow-up scheduled",
+      "follow_up.sent": "Follow-up sent",
+      "appointment.booked": "Appointment saved",
+      "pipeline.stage_changed": "Request status updated",
+      "follow_up.cancelled": "Pending follow-up cancelled",
+      "booking_confirmation.sent": "Appointment details sent",
+    };
+    label.textContent = eventLabels[event.event_type] || "Recorded lifecycle event";
+    const raw = document.createElement("code");
+    raw.textContent = `${event.event_type || "event"} · ${event.status || "unknown"}`;
     timestamp.textContent = event.created_at || "Timestamp unavailable";
-    item.append(label, timestamp);
+    const description = document.createElement("div");
+    description.append(label, raw);
+    item.append(description, timestamp);
     audits.append(item);
   });
   overview.append(auditHeading, audits);
   traceSummary.append(overview);
+  [
+    ["Contact", view.contact],
+    ["Urgency", view.urgency],
+    ["Preferred time", view.preferredTime],
+    ["AI outcome", view.rawAiStatus || "prepared_pending_persistence"],
+    ["Needs review", view.needsReview ? "true" : "false"],
+    ["Received from form", view.clientReceivedAt],
+    ["Persisted at", view.persistedAt],
+    ["Raw pipeline stage", view.rawPipelineStage],
+    ["Raw follow-up state", view.rawFollowUpStatus],
+    ["Follow-up due", formatBusinessTime(view.followUpDueAt)],
+    ["Follow-up completed", formatBusinessTime(view.followUpCompletedAt)],
+    ["Appointment ID", view.appointmentId],
+    ["Raw appointment state", view.rawBookingStatus],
+    ["Confirmation sent", formatBusinessTime(view.confirmationSentAt)],
+    ["Recovery state", view.rawRecoveryState],
+    ["Recovery job ID", view.recoveryJobId],
+  ].forEach(([label, value]) => appendTraceField(traceTechnicalGrid, label, value));
   traceRaw.textContent = JSON.stringify(trace, null, 2);
   technicalDetails.hidden = false;
 }
@@ -220,7 +257,7 @@ sampleLeadButton.addEventListener("click", () => {
     form.elements[field].value = value;
   });
   status.className = "";
-  status.textContent = "Sample synthetic request loaded. You can edit any field before submitting.";
+  status.textContent = "Sample request loaded. You can edit any field before submitting.";
   form.elements.full_name.focus();
 });
 
@@ -277,13 +314,16 @@ bookingForm.addEventListener("submit", async (event) => {
     if (!view) throw new Error("The saved appointment response could not be verified.");
     bookingResultTitle.textContent = view.title;
     bookingAppointmentId.textContent = view.appointmentId;
+    bookingRequestId.textContent = view.bookingRequestId;
     bookingAppointmentTime.textContent = formatBusinessTime(
       view.appointmentAt,
       view.businessTimezone,
     );
     bookingPipelineStage.textContent = view.pipelineStage;
+    bookingRawPipelineStage.textContent = view.rawPipelineStage;
     bookingFollowUpStatus.textContent = view.followUpStatus;
-    bookingConfirmationState.textContent = view.confirmationState;
+    bookingConfirmationState.textContent = view.confirmationStateLabel;
+    bookingRawConfirmationState.textContent = view.confirmationState;
     bookingResult.hidden = false;
     bookingStatus.className = view.confirmationState === "unconfirmed" ? "" : "success";
     bookingStatus.textContent =
@@ -363,7 +403,7 @@ form.addEventListener("submit", async (event) => {
     }
     status.className = created ? "success" : "";
     status.textContent = created
-      ? "The CRM response contract was verified."
+      ? "Your service request was saved and verified."
       : "Your enquiry is durably queued. Refresh its trace before booking.";
     traceId.value = body.correlation_id;
     if (created) {

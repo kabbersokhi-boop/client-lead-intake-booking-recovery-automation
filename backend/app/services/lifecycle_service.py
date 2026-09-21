@@ -402,7 +402,7 @@ class LifecycleService:
             lead.email,
             subject,
             plain_text,
-            _html_message("Appointment confirmation", lead.full_name, paragraphs, details),
+            _html_message("Saved appointment details", lead.full_name, paragraphs, details),
         )
         sent_at = datetime.now(timezone.utc)
         appointment.confirmation_sent_at = sent_at

@@ -67,11 +67,14 @@ function response(body, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
-function summary(counts = {}) {
+function summary(counts = {}, incidentCounts = {}) {
   return {
     observed_at: observed,
     job_counts: { pending: 0, processing: 0, retry_wait: 0, completed: 0, blocked: 0, needs_review: 0, ...counts },
     open_incident_count: 0,
+    open_linked_incident_count: 0,
+    open_unlinked_incident_count: 0,
+    ...incidentCounts,
   };
 }
 
@@ -148,7 +151,7 @@ function findAll(root, predicate, results = []) {
 function createHarness({ abortAware = true } = {}) {
   const elements = new Map();
   const ids = [
-    "refresh", "summary-status", "state-counts", "incident-count", "job-state", "lookup-kind", "lookup-id", "jobs-status", "jobs-body", "jobs-page", "jobs-previous", "jobs-next", "job-detail", "incident-state", "incidents-status", "incidents-list", "incidents-page", "incidents-previous", "incidents-next", "job-filters", "incident-filters",
+    "refresh", "summary-status", "state-counts", "incident-count", "incident-context", "job-state", "lookup-kind", "lookup-id", "jobs-status", "jobs-body", "jobs-page", "jobs-previous", "jobs-next", "job-detail", "incident-state", "incidents-status", "incidents-list", "incidents-page", "incidents-previous", "incidents-next", "job-filters", "incident-filters",
   ];
   ids.forEach((id) => elements.set(id, new Element()));
   elements.get("lookup-kind").value = "job_id";
@@ -217,6 +220,21 @@ test("operations browser code uses only read projections and safe DOM rendering"
   assert.match(source, /textContent/);
 });
 
+test("summary distinguishes linked recovery work from unlinked historical records", async () => {
+  const harness = createHarness();
+  harness.findRequest("/summary").resolve(summary({}, {
+    open_incident_count: 2,
+    open_linked_incident_count: 0,
+    open_unlinked_incident_count: 2,
+  }));
+  harness.findRequest("/jobs?").resolve(jobs());
+  harness.findRequest("/incidents?").resolve(incidents());
+  await harness.flush();
+  assert.match(harness.elements.get("incident-count").textContent, /linked to durable work: 0/);
+  assert.match(harness.elements.get("incident-context").textContent, /do not identify unresolved customer requests/);
+  assert.match(harness.elements.get("state-counts").textContent, /Pendingpending0/);
+});
+
 test("only workflow-scoped local n8n execution routes become links", async () => {
   const harness = createHarness();
   await settleInitial(harness);
@@ -280,7 +298,7 @@ test("successful refresh re-reads selected detail and labels its observation", a
   harness.findRequest("/incidents?", beforeRefresh).resolve(incidents());
   harness.findRequest(`/jobs/${jobA}`, beforeRefresh).resolve(detail(jobA, "completed", { observed_at: "2026-09-20T14:00:00Z" }));
   await harness.flush();
-  assert.match(harness.elements.get("job-detail").textContent, /Current statecompleted/);
+  assert.match(harness.elements.get("job-detail").textContent, /Current stateCompleted \(completed\)/);
   assert.match(harness.elements.get("job-detail").textContent, /Observed/);
 });
 
@@ -325,7 +343,7 @@ test("draft job and incident controls do not affect Refresh or the selected deta
   incidentsRequest.resolve(incidents());
   refreshRequests.find((request) => request.url.includes(`/jobs/${jobA}`)).resolve(detail(jobA, "completed"));
   await harness.flush();
-  assert.match(harness.elements.get("job-detail").textContent, /Current statecompleted/);
+  assert.match(harness.elements.get("job-detail").textContent, /Current stateCompleted \(completed\)/);
 });
 
 test("applying a query removes stale rows and stale row clicks cannot recreate selection", async () => {

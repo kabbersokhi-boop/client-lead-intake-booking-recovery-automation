@@ -150,6 +150,8 @@ def test_booking_confirmation_sends_once_on_replay(db):
     assert settings.business_timezone in message["plain_text"]
     assert message["subject"] == "Appointment details saved: Furnace Service"
     assert "appointment details have been saved" in message["plain_text"]
+    assert "Saved appointment details" in message["html_text"]
+    assert "Appointment confirmation" not in message["html_text"]
     assert "pending follow-up for this request was cancelled" in message["plain_text"]
     assert "does not reserve a technician" in message["plain_text"]
 

@@ -16,9 +16,24 @@ Do not reactivate diagnostic fault injection. Keep the diagnostic workflow inact
 - Use a fresh fictional email address and a future Vancouver business time. Do not use a
   retained evidence identity for the normal journey.
 
+## Workflow map
+
+Keep the retained workflow names unchanged and explain them in three groups:
+
+- **Customer journey:** **Lead Intake - Validation, AI Enrichment and CRM Persistence**,
+  **Lifecycle - Appointment Booking and Confirmation**, and
+  **Lifecycle - Dispatch Due Follow-ups**.
+- **Reliability / debugging:** **CRM Lead Write Recovery Dispatch**,
+  **CRM Recovery Failure Recorder**, and inactive
+  **Controlled CRM Rate-Limit Diagnostic**.
+- **Management reporting:** inactive/manual **Management Reporting - HVAC Snapshot**.
+
+The exported `active` flags are sanitized source metadata; verify the preserved runtime state
+before a demonstration. Do not rename workflows merely to improve the grouping.
+
 ## Normal customer journey
 
-1. **Lead form:** On the local lead form, choose **Use sample lead** or enter a fresh fictional
+1. **Service request form:** On the local form, choose **Load sample request** or enter a fresh fictional
    furnace or air-conditioning request, then select **Submit synthetic request**. Point out that
    the page calls this a local demonstration and that AI enrichment has a safe fallback.
 2. **Matching n8n intake execution:** Open the newest execution for **Lead Intake - Validation,
@@ -41,7 +56,9 @@ Do not reactivate diagnostic fault injection. Keep the diagnostic workflow inact
 7. **Operations View:** Return to Automation Operations, select **Refresh**, then find the
    fresh record by its exact correlation ID or job ID. The page is read-only: it cannot retry,
    resolve, requeue, send, or change records. Explain that job state, attempt history, incident
-   history, and trace are independently observed durable projections.
+   history, and trace are independently observed durable projections. The two retained open
+   unlinked records are historical diagnostic artifacts (`272` and `276`), not current customer
+   failures; the linked `283` incident is resolved.
 
 ## Retained failure and recovery evidence
 
@@ -92,6 +109,21 @@ This is a UI-only optional segment. Do not use Codex or a terminal during the in
    is: `1614` created the first row; `1627` showed green modules but a stale **Generated At**
    value because Update Row was mapped from Search Rows; `1654` kept the search row number but
    mapped all 16 fresh values from Webhooks, proving a same-row refresh with no duplicate.
+
+## Optional HighLevel contract demonstration
+
+1. Open `http://localhost:18080` and read the environment badge aloud: local test environment,
+   not live HighLevel, and not a HighLevel sandbox.
+2. Use **Contacts** and **Opportunities / Pipeline** to show the two isolated external
+   representations. Explain that PostgreSQL remains application/reliability truth.
+3. Use **API Events** to trace contact lookup, upsert, read-back verification, opportunity
+   search, and opportunity creation. Expand one event to show sanitized request/response data,
+   simulator request ID, submission reference, and allowlisted `Retry-After` without headers or
+   credentials.
+4. Use **Appointments** to show the deliberate omission: automatic lifecycle-stage and
+   appointment synchronization are not implemented.
+5. Use **Fault Testing** only as an explanation of capability during the interview. Do not arm a
+   fault or reset the simulator while presenting retained evidence.
 
 ## Honest scope statement
 

@@ -4,6 +4,51 @@
   const AI_STATUSES = new Set(["enriched", "fallback_invalid", "fallback_unavailable"]);
   const BOOKING_STATES = new Set(["created", "replayed"]);
 
+  const labels = {
+    pipeline: {
+      new_lead: "New request",
+      contacted: "Follow-up sent",
+      appointment_booked: "Appointment saved",
+    },
+    followUp: {
+      pending: "Scheduled",
+      sent: "Sent",
+      cancelled: "Cancelled after booking",
+    },
+    recovery: {
+      pending: "Waiting to process",
+      processing: "Processing",
+      retry_wait: "Waiting to retry",
+      completed: "Completed",
+      blocked: "Blocked — operator action required",
+      needs_review: "Needs operator review",
+    },
+    ai: {
+      enriched: "Enriched",
+      fallback_invalid: "Safe fallback — review recommended",
+      fallback_unavailable: "Safe fallback — provider unavailable",
+    },
+    confirmation: {
+      sent: "Sent to the development inbox",
+      already_sent: "Already sent to the development inbox",
+      skipped_no_email: "Not sent — no email address",
+      unconfirmed: "Delivery not confirmed",
+    },
+  };
+
+  function humanize(value) {
+    return String(value || "").replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase());
+  }
+
+  function labelFor(group, value, fallback = "Not applicable") {
+    if (!value) return fallback;
+    return labels[group]?.[value] || humanize(value);
+  }
+
+  function serviceLabel(value) {
+    return value ? humanize(value) : "Not enriched";
+  }
+
   function snapshot(values) {
     return {
       full_name: String(values.full_name || ""),
@@ -79,12 +124,16 @@
     return {
       title: body.intake_state === "replayed" ? "Request replayed safely" : "Request saved",
       intakeState: body.intake_state,
+      submissionId: body.submission_id,
       correlationId: body.correlation_id,
       crmLeadId: body.crm_lead_id,
       aiStatus: body.ai_status,
+      aiStatusLabel: labelFor("ai", body.ai_status),
       aiStatusTone: body.ai_status === "enriched" ? "success" : "warning",
-      pipelineStage: body.pipeline_stage,
-      followUpStatus: body.follow_up_status || "not scheduled",
+      pipelineStage: labelFor("pipeline", body.pipeline_stage),
+      rawPipelineStage: body.pipeline_stage,
+      followUpStatus: labelFor("followUp", body.follow_up_status, "Not scheduled"),
+      rawFollowUpStatus: body.follow_up_status || "not_scheduled",
       followUpDueAt: body.follow_up_due_at || "Not applicable",
     };
   }
@@ -110,6 +159,7 @@
       correlationId: body.correlation_id,
       recoveryJobId: body.recovery_job_id,
       recoveryState: body.recovery_state,
+      recoveryStateLabel: labelFor("recovery", body.recovery_state),
     };
   }
 
@@ -172,9 +222,13 @@
       appointmentId: body.appointment_id,
       appointmentAt: body.appointment_at,
       businessTimezone: body.business_timezone,
-      pipelineStage: body.pipeline_stage,
-      followUpStatus: body.follow_up_status || "not scheduled",
+      bookingRequestId: body.booking_request_id,
+      pipelineStage: labelFor("pipeline", body.pipeline_stage),
+      rawPipelineStage: body.pipeline_stage,
+      followUpStatus: labelFor("followUp", body.follow_up_status, "Not scheduled"),
+      rawFollowUpStatus: body.follow_up_status || "not_scheduled",
       confirmationState: body.confirmation_state,
+      confirmationStateLabel: labelFor("confirmation", body.confirmation_state),
       notificationMessage: body.notification_message || null,
     };
   }
@@ -210,23 +264,28 @@
         pending: true,
         customer: "Enquiry pending CRM delivery",
         contact: "Private payload retained in the recovery job",
-        pipelineStage: "not created",
+        pipelineStage: "Waiting to be saved",
+        rawPipelineStage: "not_created",
         serviceType: "Prepared; not yet persisted",
+        location: "Pending",
         urgency: "Pending",
         preferredTime: "Pending",
         aiStatus: "Prepared; inspect after completion",
         needsReview: ["needs_review", "blocked"].includes(recoveryJob.state),
         clientReceivedAt: "Available in private recovery data",
         persistedAt: "Not yet created",
-        followUpStatus: "not scheduled",
+        followUpStatus: "Not scheduled",
+        rawFollowUpStatus: "not_scheduled",
         followUpDueAt: "Not applicable",
         followUpCompletedAt: "Not applicable",
         appointmentId: "Not booked",
         appointmentAt: "Not booked",
         appointmentTimezone: "America/Vancouver",
-        bookingStatus: "unavailable while pending",
+        bookingStatus: "Not available while pending",
+        rawBookingStatus: "unavailable_while_pending",
         confirmationSentAt: "Not sent",
-        recoveryState: recoveryJob.state,
+        recoveryState: labelFor("recovery", recoveryJob.state),
+        rawRecoveryState: recoveryJob.state,
         recoveryJobId: recoveryJob.id,
         audits: [],
       };
@@ -237,25 +296,32 @@
     return {
       customer: lead.full_name || "Not available",
       contact: [lead.email, lead.phone].filter(Boolean).join(" · ") || "Not available",
-      pipelineStage: lead.pipeline_stage || "Not available",
-      serviceType: lead.service_type || "Not enriched",
-      urgency: lead.urgency || "Not enriched",
+      pipelineStage: labelFor("pipeline", lead.pipeline_stage, "Not available"),
+      rawPipelineStage: lead.pipeline_stage || "not_available",
+      serviceType: serviceLabel(lead.service_type),
+      rawServiceType: lead.service_type || "not_enriched",
+      location: lead.location || "Not provided",
+      urgency: labelFor(null, lead.urgency, "Not enriched"),
       preferredTime: lead.preferred_time || "Not provided",
-      aiStatus: lead.ai_status || "Not available",
+      aiStatus: labelFor("ai", lead.ai_status, "Not available"),
+      rawAiStatus: lead.ai_status || "not_available",
       needsReview: lead.needs_review === true,
       clientReceivedAt: lead.client_received_at || "Not available",
       persistedAt: lead.created_at || "Not available",
-      followUpStatus: followUp?.status || "not scheduled",
+      followUpStatus: labelFor("followUp", followUp?.status, "Not scheduled"),
+      rawFollowUpStatus: followUp?.status || "not_scheduled",
       followUpDueAt: followUp?.due_at || "Not applicable",
       followUpCompletedAt: followUp?.sent_at || followUp?.cancelled_at || "Not applicable",
       appointmentId: appointment?.id || "Not booked",
       appointmentAt: appointment?.appointment_at || "Not booked",
       appointmentTimezone: appointment?.business_timezone || "America/Vancouver",
-      bookingStatus: appointment?.status || "not booked",
+      bookingStatus: appointment?.status === "booked" ? "Saved" : "Not booked",
+      rawBookingStatus: appointment?.status || "not_booked",
       confirmationSentAt: appointment?.confirmation_sent_at || "Not sent",
       audits: Array.isArray(trace.audit_events) ? trace.audit_events : [],
       pending: false,
-      recoveryState: recoveryJob?.state || "not queued",
+      recoveryState: labelFor("recovery", recoveryJob?.state, "Not queued"),
+      rawRecoveryState: recoveryJob?.state || "not_queued",
       recoveryJobId: recoveryJob?.id || "Not applicable",
     };
   }
@@ -277,9 +343,12 @@
     bookingView,
     confirmationIsSettled,
     fetchWithTimeout,
+    humanize,
+    labelFor,
     pendingFor,
     queuedView,
     sameSnapshot,
+    serviceLabel,
     snapshot,
     successView,
     traceView,
