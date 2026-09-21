@@ -16,7 +16,7 @@ from app.services.crm_service import CreateLeadResult, DevelopmentCRMService
 E164_RE = re.compile(r"^\+[1-9]\d{6,14}$")
 
 
-@dataclass(frozen=True)
+@dataclass
 class HighLevelProviderError(Exception):
     status_code: int | None
     error_class: str
@@ -46,6 +46,7 @@ class HighLevelClient:
             },
             timeout=settings.highlevel_timeout_seconds,
             transport=transport,
+            trust_env=False,
         )
 
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
@@ -190,99 +191,104 @@ class HighLevelClient:
             )
         return record
 
+    def _lookup_contacts_by_identifier(
+        self, identifier: str, value: str
+    ) -> list[dict[str, Any]]:
+        contacts_by_id: dict[str, dict[str, Any]] = {}
+        next_cursor = None
+        seen_cursors: set[str] = set()
+        for _ in range(50):
+            params = {
+                "locationId": self.settings.highlevel_location_id,
+                identifier: value,
+                "limit": 20,
+            }
+            if next_cursor is not None:
+                params["nextCursor"] = next_cursor
+            body = self._request("GET", "/contacts/lookup", params=params)
+            contacts = body.get("contacts")
+            if not isinstance(contacts, list):
+                raise HighLevelProviderError(
+                    502,
+                    "highlevel_malformed_response",
+                    "HighLevel returned a malformed contact lookup response.",
+                )
+            for contact in contacts:
+                if (
+                    not isinstance(contact, dict)
+                    or not isinstance(contact.get("id"), str)
+                    or contact.get("locationId") != self.settings.highlevel_location_id
+                ):
+                    raise HighLevelProviderError(
+                        502,
+                        "highlevel_malformed_response",
+                        "HighLevel returned a malformed contact lookup response.",
+                    )
+                contacts_by_id[contact["id"]] = contact
+            next_cursor = body.get("nextCursor")
+            if next_cursor is None:
+                return list(contacts_by_id.values())
+            if (
+                not isinstance(next_cursor, str)
+                or not next_cursor
+                or next_cursor in seen_cursors
+            ):
+                raise HighLevelProviderError(
+                    502,
+                    "highlevel_malformed_response",
+                    "HighLevel returned a malformed contact lookup cursor.",
+                )
+            seen_cursors.add(next_cursor)
+        raise HighLevelProviderError(
+            409,
+            "highlevel_identity_conflict",
+            "HighLevel contact reconciliation exceeded its bounded search window.",
+        )
+
     def _lookup_contact(self, payload: CRMLeadCreate) -> dict[str, Any] | None:
         identifiers: list[tuple[str, str]] = []
         if payload.email:
             identifiers.append(("email", str(payload.email)))
         if payload.phone:
             identifiers.append(("phone", self._phone_for_contract(payload.phone)))
-        contacts_by_id: dict[str, dict[str, Any]] = {}
-        for identifier, value in identifiers:
-            next_cursor = None
-            seen_cursors: set[str] = set()
-            for _ in range(50):
-                params = {
-                    "locationId": self.settings.highlevel_location_id,
-                    identifier: value,
-                    "limit": 20,
-                }
-                if next_cursor is not None:
-                    params["nextCursor"] = next_cursor
-                body = self._request("GET", "/contacts/lookup", params=params)
-                contacts = body.get("contacts")
-                if not isinstance(contacts, list):
-                    raise HighLevelProviderError(
-                        502,
-                        "highlevel_malformed_response",
-                        "HighLevel returned a malformed contact lookup response.",
-                    )
-                for contact in contacts:
-                    if (
-                        not isinstance(contact, dict)
-                        or not isinstance(contact.get("id"), str)
-                        or contact.get("locationId")
-                        != self.settings.highlevel_location_id
-                    ):
-                        raise HighLevelProviderError(
-                            502,
-                            "highlevel_malformed_response",
-                            "HighLevel returned a malformed contact lookup response.",
-                        )
-                    contacts_by_id[contact["id"]] = contact
-                next_cursor = body.get("nextCursor")
-                if next_cursor is None:
-                    break
-                if (
-                    not isinstance(next_cursor, str)
-                    or not next_cursor
-                    or next_cursor in seen_cursors
-                ):
-                    raise HighLevelProviderError(
-                        502,
-                        "highlevel_malformed_response",
-                        "HighLevel returned a malformed contact lookup cursor.",
-                    )
-                seen_cursors.add(next_cursor)
-            else:
-                raise HighLevelProviderError(
-                    409,
-                    "highlevel_identity_conflict",
-                    "HighLevel contact reconciliation exceeded its bounded search window.",
-                )
-        contacts = list(contacts_by_id.values())
         expected_submission = str(payload.submission_id)
-        matching = [
-            contact
-            for contact in contacts
-            if self._field_value(
-                contact, self.settings.highlevel_contact_submission_field_id
-            )
-            == expected_submission
-        ]
-        if len(matching) > 1:
-            raise HighLevelProviderError(
-                409,
-                "highlevel_identity_conflict",
-                "Multiple HighLevel contacts claim the same application submission identity.",
-            )
-        if not matching:
-            if contacts:
+        expected_correlation = str(payload.correlation_id)
+        resolved: dict[str, dict[str, Any]] = {}
+        for identifier, value in identifiers:
+            contacts = self._lookup_contacts_by_identifier(identifier, value)
+            if len(contacts) > 1:
                 raise HighLevelProviderError(
                     409,
                     "highlevel_identity_conflict",
-                    "The HighLevel duplicate match belongs to a different submission identity.",
+                    f"The supplied HighLevel {identifier} identifier is ambiguous.",
                 )
-            return None
-        contact = matching[0]
-        if self._field_value(
-            contact, self.settings.highlevel_contact_correlation_field_id
-        ) != str(payload.correlation_id):
+            if not contacts:
+                continue
+            contact = contacts[0]
+            if (
+                self._field_value(
+                    contact, self.settings.highlevel_contact_submission_field_id
+                )
+                != expected_submission
+                or self._field_value(
+                    contact, self.settings.highlevel_contact_correlation_field_id
+                )
+                != expected_correlation
+            ):
+                raise HighLevelProviderError(
+                    409,
+                    "highlevel_identity_conflict",
+                    f"The HighLevel {identifier} match belongs to a different "
+                    "application identity.",
+                )
+            resolved[contact["id"]] = contact
+        if len(resolved) > 1:
             raise HighLevelProviderError(
                 409,
                 "highlevel_identity_conflict",
-                "The HighLevel contact correlation identity conflicts with local durable state.",
+                "The supplied HighLevel identifiers resolve to different contacts.",
             )
-        return contact
+        return next(iter(resolved.values()), None)
 
     def _lookup_opportunity(
         self, payload: CRMLeadCreate, contact_id: str
@@ -295,29 +301,56 @@ class HighLevelClient:
                 "/opportunities/search",
                 params={
                     "locationId": self.settings.highlevel_location_id,
-                    "pipelineId": self.settings.highlevel_pipeline_id,
-                    "contactId": contact_id,
                     "status": "all",
                     "page": page,
                     "limit": 100,
                 },
             )
             opportunities = body.get("opportunities")
-            if not isinstance(opportunities, list):
+            if (
+                not isinstance(opportunities, list)
+                or not isinstance(body.get("meta"), dict)
+                or not isinstance(body.get("aggregations"), dict)
+            ):
                 raise HighLevelProviderError(
                     502,
                     "highlevel_malformed_response",
                     "HighLevel returned a malformed opportunity search response.",
                 )
             for opportunity in opportunities:
-                if not isinstance(opportunity, dict) or not isinstance(
-                    opportunity.get("id"), str
+                if (
+                    not isinstance(opportunity, dict)
+                    or not isinstance(opportunity.get("id"), str)
+                    or not isinstance(opportunity.get("contactId"), str)
+                    or opportunity.get("locationId")
+                    != self.settings.highlevel_location_id
+                    or not isinstance(opportunity.get("pipelineId"), str)
+                    or not isinstance(opportunity.get("customFields"), list)
                 ):
                     raise HighLevelProviderError(
                         502,
                         "highlevel_malformed_response",
                         "HighLevel returned a malformed opportunity search response.",
                     )
+                for field in opportunity["customFields"]:
+                    if not isinstance(field, dict) or not isinstance(
+                        field.get("id"), str
+                    ):
+                        raise HighLevelProviderError(
+                            502,
+                            "highlevel_malformed_response",
+                            "HighLevel returned malformed opportunity custom fields.",
+                        )
+                    if (
+                        field["id"]
+                        == self.settings.highlevel_opportunity_submission_field_id
+                        and not isinstance(field.get("value", field.get("fieldValue")), str)
+                    ):
+                        raise HighLevelProviderError(
+                            502,
+                            "highlevel_malformed_response",
+                            "HighLevel returned malformed opportunity identity data.",
+                        )
                 if (
                     self._field_value(
                         opportunity,
@@ -379,7 +412,8 @@ class HighLevelClient:
             verified = self._request("GET", f"/contacts/{contact_id}")
             verified_contact = self._record(verified, "contact")
             if (
-                verified_contact.get("locationId")
+                verified_contact.get("id") != contact_id
+                or verified_contact.get("locationId")
                 != self.settings.highlevel_location_id
                 or self._field_value(
                     verified_contact,
@@ -407,6 +441,9 @@ class HighLevelClient:
             opportunity.get("contactId") != contact_id
             or opportunity.get("locationId") != self.settings.highlevel_location_id
             or opportunity.get("pipelineId") != self.settings.highlevel_pipeline_id
+            or opportunity.get("pipelineStageId")
+            != self.settings.highlevel_stage_new_lead_id
+            or opportunity.get("status") != "open"
             or self._field_value(
                 opportunity, self.settings.highlevel_opportunity_submission_field_id
             )

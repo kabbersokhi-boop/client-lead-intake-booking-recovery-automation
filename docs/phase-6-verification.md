@@ -41,16 +41,19 @@ simulator contact and opportunity IDs never replace application correlation trut
 | Mode | Meaning |
 | --- | --- |
 | `development` | Default. Existing `DevelopmentCRMProvider`; no HighLevel claim or external HTTP effect. |
-| `highlevel_simulator` | Local Lead persistence plus the HighLevel-specific HTTP adapter targeting the isolated simulator. |
+| `highlevel_simulator` | Local Lead persistence plus the HighLevel-specific HTTP adapter targeting an allowlisted local simulator URL only. |
 | `highlevel_live` | Intentionally unavailable until credentials/access and real account mappings are reviewed and verified. |
 
 Simulator URL: `http://localhost:18080`. The browser surface and backend remain loopback-bound.
 The adapter target and local simulator token come from ignored/protected environment
-configuration. No usable token is committed.
+configuration. No usable token is committed. Configuration accepts plain HTTP only on exact hosts
+`highlevel-simulator`, `localhost`, `127.0.0.1`, or `[::1]`, requires an explicit port, rejects
+userinfo/path/query/fragment forms, and disables environment proxy use. Simulator mode therefore
+cannot be repointed to an arbitrary external or live-vendor URL.
 
 ## Official HighLevel source record
 
-Reviewed 2026-09-21. Only official HighLevel documentation was used for API-contract facts.
+Reviewed 2026-09-22. Only official HighLevel documentation was used for API-contract facts.
 
 | Official page | URL | Contract detail relied upon |
 | --- | --- | --- |
@@ -63,9 +66,10 @@ Reviewed 2026-09-21. Only official HighLevel documentation was used for API-cont
 | Search Opportunity | https://marketplace.gohighlevel.com/docs/ghl/opportunities/search-opportunity | `GET /opportunities/search`, contact/location/pipeline filters, pagination, v3 response/error shapes, bearer methods, and sub-account token requirements. |
 | Create Opportunity | https://marketplace.gohighlevel.com/docs/ghl/opportunities/create-opportunity/ | `POST /opportunities/`, required location/pipeline/contact/name/status values, optional stage/custom fields, `Version: v3`, and 201 `{opportunity}` response. |
 | Update Opportunity | https://marketplace.gohighlevel.com/docs/ghl/opportunities/update-opportunity/ | `PUT /opportunities/:id`, stage/status update shape, `Version: v3`, and `{opportunity}` response. |
-| Create appointment | https://marketplace.gohighlevel.com/docs/2023-02-21/ghl/calendars/create-appointment/ | Documented appointment fields and the older `2023-02-21` contract version; used only to assess mapping readiness, not implemented. |
+| Create appointment | https://marketplace.gohighlevel.com/docs/ghl/calendars/create-appointment/ | Current `POST /calendars/events/appointments` contract, required calendar/location/contact/start-time fields, `Version: v3`, and response shape; used only to assess mapping readiness, not implemented. |
 | Get Appointment | https://marketplace.gohighlevel.com/docs/ghl/calendars/get-appointment/ | Current documented appointment read path and v3 response wrapper; used only to assess mapping readiness. |
 | Rate Limits | https://marketplace.gohighlevel.com/docs/other/rate-limits/index.html | OAuth public-API burst/daily limits and documented `X-RateLimit-*` response headers. The page does not document `Retry-After` as a universal HighLevel guarantee. |
+| Changelog | https://marketplace.gohighlevel.com/docs/Changelog/ | Records `GET /contacts/lookup` as added on 2026-08-12; used to identify the new reconciliation contract and avoid relying on the removed legacy contact-list API. |
 
 No reviewed official source established a general idempotency-key header or universal exactly-once
 semantic. The implementation does not invent one. Contact upsert is treated as a documented
@@ -116,11 +120,13 @@ unreliable HTTP call was not inserted inside the approved booking or email trans
 
 ## Appointment decision
 
-Appointment create/read was deliberately omitted. Current official documentation exposes a
-create contract under the older `2023-02-21` version while related current pages use v3, and the
-project has no verified live calendar, user, or availability IDs. More importantly, a post-booking
-external write needs durable ownership to avoid reporting a failed booking after the local
-transaction already committed. Phase 2 booking, follow-up cancellation, and Mailpit confirmation
+Appointment create/read was deliberately omitted. Current official documentation now exposes
+`POST /calendars/events/appointments` and `GET /calendars/events/appointments/:eventId` under
+`Version: v3`. The project still has no verified live calendar, user, service, availability, or
+meeting-location IDs. More importantly, a post-booking external write needs durable ownership to
+avoid reporting a failed booking after the local transaction already committed; performing it
+inside the booking transaction would hold database locks across an unreliable network without
+making the two systems atomic. Phase 2 booking, follow-up cancellation, and Mailpit confirmation
 remain unchanged and authoritative for this reference build.
 
 The simulator UI includes an Appointments page that explicitly says synchronization is not
@@ -128,20 +134,24 @@ implemented. It never fabricates an external appointment.
 
 ## Identity, replay, and reconciliation
 
-The local job retains the first canonical prepared payload. HighLevel contact lookup checks every
-supplied documented identifier: exact email and documented E.164 phone. A matching contact must
-carry the expected configured submission and correlation custom fields. A duplicate match on
-either identifier with different application identity is a conflict, not absence.
+The local job retains the first canonical prepared payload. HighLevel contact lookup evaluates
+every supplied documented identifier independently: exact case-insensitive email and documented
+E.164 phone. Every non-empty identifier result must contain exactly one contact carrying the
+expected submission and correlation fields, and all non-empty results must resolve to the same
+contact ID. A foreign match, multiple matches for one identifier, or split email/phone contacts is
+an identity conflict before upsert. One identifier may be absent when the other resolves exactly
+to the expected contact; that reuses the known contact without rewriting it.
 
 Contact lookup follows the documented opaque cursor in bounded 20-record pages and rejects a
-repeated or malformed cursor. Opportunity reconciliation searches by location, pipeline, and
-contact, then requires the stable submission custom field. It follows documented page-number
-pagination in bounded 100-record pages, detects duplicate identity across pages, verifies the
-matching opportunity's contact/location/pipeline linkage, and refuses to infer absence beyond
-1,000 matching contacts or filtered opportunities. Recovery performs this read path before another
-uncertain write. If the contact and opportunity already exist, the existing local Lead result
-completes the durable job; if either business effect is absent, the existing recovery workflow may
-authorize another write.
+repeated or malformed cursor. Opportunity reconciliation scans the location rather than filtering
+first by contact or pipeline, then finds the stable submission custom field and validates its
+contact/location/pipeline linkage. This prevents a same-submission opportunity on the wrong
+contact or pipeline from being hidden by filters and recreated. It follows documented page-number
+pagination in bounded 100-record pages, validates required response containers and identity data,
+detects duplicates across pages, and refuses to infer absence beyond 1,000 location opportunities.
+Recovery performs this read path before another uncertain write. If contact and opportunity
+already exist, the local Lead result completes the durable job; if either effect is safely absent,
+the existing recovery workflow may authorize another write.
 
 Once a durable job is completed, an unchanged intake replay returns the canonical local result
 without recontacting the upstream system. A fresh upstream 429 or timeout therefore cannot turn a
@@ -152,6 +162,28 @@ This is at-least-once delivery/retries with idempotent business effects and expl
 reconciliation. It is not a universal exactly-once claim. The exact contact lookup endpoint is
 officially OAuth-only, so live use of this strategy requires OAuth access or a separately reviewed
 supported reconciliation design.
+
+External contact/opportunity IDs are not persisted in the application database in this fallback;
+the adapter reconciles from stable custom fields on each unfinished job. That is sufficient for
+the implemented create/recovery path but makes reconciliation bounded and more expensive. Future
+automatic lifecycle synchronization would likely need durable external-ID mapping plus its own
+durable lifecycle-sync ownership.
+
+## Local commit and external consistency
+
+The composed `DevelopmentCRMService` commits the Lead, initial follow-up, and audit state before
+the external HTTP projection runs. If contact upsert fails, the durable recovery job retries after
+reconciliation. If contact succeeds and opportunity fails, the next reconciliation reuses the
+contact and creates only the missing opportunity. If either acknowledgement is lost, lookup runs
+before another write. If both external effects succeed but local recovery completion fails, a
+later reconciliation can confirm them and finish the job without another create.
+
+This means local follow-up can become due while external projection is still retrying. That is an
+explicit eventual-consistency limitation of the fallback, not hidden atomicity. The established
+Phase 3 job owns retry/lease/attempt state; the adapter has no second retry loop. A race between
+the final duplicate lookup and vendor upsert also cannot be made universally atomic because the
+official contract does not establish an idempotency key. Live verification must reassess that
+residual against actual location duplicate settings.
 
 ## Error translation and faults
 
@@ -173,12 +205,13 @@ headers, environment data, and private URLs are not stored or returned.
 ## Deterministic coverage
 
 Focused coverage proves request/header mapping, strict response parsing, exact external identity,
+split-identifier refusal, local-only target validation, location-wide opportunity identity,
 one external contact/opportunity after replay, conflicting-payload refusal before an external
 rewrite, opportunity stage mapping, 401, 429 and `Retry-After`, 500, timeout, malformed success,
 strict simulator validation, event redaction, one-shot reset, provider-mode truth, the unchanged
 development provider, and durable recovery ownership around a simulated 429.
 
-The complete verifier runs 126 Python tests, 28 frontend/helper tests, and 43 workflow tests: 197
+The complete verifier runs 153 Python tests, 28 frontend/helper tests, and 43 workflow tests: 224
 tests total. It also runs Ruff across the application, simulator, tests, and demo helper; checks
 simulator JavaScript syntax; parses tracked workflow/fixture JSON; checks shell syntax; validates
 Docker Compose; runs `git diff --check`; and scans tracked content for secret patterns.
@@ -204,8 +237,8 @@ isolated reset produced contact `sim_contact_32d25c73c42243cd` and opportunity
 `Retry-After: 3`, recorded simulator request `sim_req_5f28d86ff0c64946`, reset automatically,
 and the following reconciliation lookup returned 200.
 
-Final inspected simulator state: two contacts, two opportunities, zero appointments, 19 events,
-Normal fault mode, and no serialized Authorization field. Final PostgreSQL counts: 49 Leads, 5
+Pre-correction inspected simulator state: two contacts, two opportunities, zero appointments, 19
+events, Normal fault mode, and no serialized Authorization field. PostgreSQL counts were 49 Leads, 5
 Appointments, 43 FollowUps, 38 CRMWriteJobs, 41 CRMWriteAttempts, and 3 RecoveryIncidents, with no
 active CRM fault. Backend, simulator, PostgreSQL, Mailpit, and the preserved n8n instance remained
 healthy.
@@ -219,6 +252,19 @@ bootstrap explicitly forces `development` before application import so determini
 does not inherit protected simulator configuration from `.env`. After the final linkage hardening,
 the rebuilt backend reconciled the stored submission with HTTP 200 and completed replay again
 added zero requests (19 events before and after).
+
+The 2026-09-22 senior correction rebuilt only backend and simulator from the corrected code, then
+reprojected the same two stored canonical synthetic payloads without changing PostgreSQL or n8n.
+Destination inspection found two contacts (`sim_contact_18bb2e0cb3684146` and
+`sim_contact_94eafe650a5940a8`), two opportunities (`sim_opportunity_29403ff56d324167` and
+`sim_opportunity_f60b5b103d754e45`), and zero appointments. An authenticated completed replay
+returned HTTP 200 with event count unchanged at 12. A simulator-only one-shot 429 recorded request
+`sim_req_021296d4a0374e7a` with `Retry-After: 3`; the next lookup returned 200 and fault state reset
+to Normal. Final state held 14 sanitized events, the current documentation review date, and none of
+the configured simulator token, adapter key, or `Authorization` label. Durable counts remained 49
+Leads, 5 Appointments, 43 FollowUps, 38 CRMWriteJobs, 41 CRMWriteAttempts, and 3 RecoveryIncidents,
+with no active CRM fault. No n8n, NVIDIA, Make, SMTP, booking, or historical diagnostic execution
+was triggered during this correction check.
 
 The preserved n8n state remained unchanged: intake, appointment booking, follow-up dispatch,
 recovery dispatch, and recovery error recording stayed active; controlled diagnostic and
@@ -265,5 +311,7 @@ the actual account.”
 “The development provider is the existing local CRM implementation used by the reference build.
 It is not HighLevel. The HighLevel adapter is a separate external integration path.”
 
-“The surrounding orchestration does not need redesign; the remaining work is live vendor
-authentication, account-specific IDs/mappings, and contract verification.”
+“The surrounding intake and recovery architecture should not need redesign. Live deployment still
+requires supported OAuth or another reviewed reconciliation path, real location/pipeline/custom-
+field IDs, live response verification, and separate durable ownership for any future lifecycle or
+calendar synchronization.”

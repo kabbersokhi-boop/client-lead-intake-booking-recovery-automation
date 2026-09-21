@@ -6,12 +6,15 @@ Future phases must update this document before their final commit so the reposit
 
 ## Current checkpoint
 
-- Review date: 2026-09-21.
+- Review date: 2026-09-22.
 - Phase 6 fallback starts from approved Phase 7A checkpoint `bfc4d88dbfb291b2dbcb52eb77e2ab6c2a13dd1b`.
+- The senior Phase 6 correction pass starts from approved checkpoint
+  `9879a9621ae0aee94c231af5bfbf5350f5dec20f`; the exact final correction SHA belongs in the
+  final report rather than creating a self-referential documentation commit.
 - Phase 6 implements a separate HighLevel HTTP adapter and loopback-only local contract simulator
   for the documented contact/opportunity subset. It is not a live integration or vendor sandbox.
-- Phase 6 deterministic verification: 126 Python tests, 28 frontend/helper tests, and 43
-  workflow tests (197 total), plus Ruff, simulator JavaScript/JSON/shell syntax, Compose
+- Phase 6 deterministic verification: 153 Python tests, 28 frontend/helper tests, and 43
+  workflow tests (224 total), plus Ruff, simulator JavaScript/JSON/shell syntax, Compose
   validation, `git diff --check`, and tracked-content secret scanning.
 - Phase 7A presentation-hardening implementation SHA: `235d1f55156820a1aa0a0b7416bf6a44a3533e4f`.
 - Phase 7A deterministic verification: 98 Python tests, 28 frontend/helper tests, and 43
@@ -209,10 +212,29 @@ the existing n8n recovery workflow retain jobs, leases, attempt limits, `Retry-A
 reconciliation ownership. `highlevel_live` fails closed.
 
 The implemented contract subset is contact upsert/read/exact lookup and opportunity
-search/create/update. Stable submission/correlation custom fields and pre-write duplicate lookup
-prevent a foreign same-email/phone contact from being relabelled. Appointment and automatic stage
-sync are omitted because a correct implementation needs a durable lifecycle-sync boundary and
-verified calendar/account IDs; Phase 2 booking was not weakened by an external call.
+search/create/update. Each supplied email/phone identifier is reconciled independently: every
+non-empty result must carry the expected submission/correlation fields and all results must
+converge on one contact ID. Split, foreign, or ambiguous identity fails before upsert. Opportunity
+identity is searched across bounded location-scoped pages before contact/pipeline linkage is
+accepted, so a wrong-link record cannot be hidden by query filters. External IDs are not persisted;
+unfinished jobs reconcile through stable custom fields.
+
+Simulator mode is structurally local: only explicit-port plain-HTTP URLs on
+`highlevel-simulator`, `localhost`, `127.0.0.1`, or `[::1]` are accepted, ambiguous URL forms are
+rejected, and proxy environment settings are ignored. `highlevel_live` still fails closed.
+
+Current official docs expose appointment create/read under `Version: v3`, correcting the earlier
+old-version rationale. Appointment and automatic stage sync remain omitted because the project
+has no verified live calendar/account IDs and correct post-booking projection needs durable
+lifecycle-sync ownership; Phase 2 booking was not weakened by an external call. Exact contact
+lookup remains officially OAuth-only, so a Private Integration Token alone is not a verified live
+reconciliation design.
+
+The local Lead/follow-up/audit commit precedes external projection. Phase 3 recovery owns retries,
+leases, attempt limits, and reconciliation if contact/opportunity projection fails or an
+acknowledgement is lost. Local follow-up can become due while projection is pending; this is an
+explicit eventual-consistency limitation. Completed durable replay stays local and cannot
+reacquire upstream failure risk.
 
 Live-local evidence on 2026-09-21 through 2026-09-22:
 
@@ -235,6 +257,12 @@ Live-local evidence on 2026-09-21 through 2026-09-22:
 - Final rebuild review caught session-only simulator configuration falling back safely to
   `development`; ignored local `.env` now explicitly configures simulator mode and a fresh random
   token, and all final runtime checks were rerun without printing that token.
+- The 2026-09-22 senior correction rebuilt only backend/simulator, reprojected the same two
+  canonical synthetic payloads, and left durable counts unchanged. Completed replay returned 200
+  with zero new simulator events; a simulator-only 429 preserved `Retry-After: 3`, the next lookup
+  returned 200, and final fault state was Normal. Final isolated state held two contacts, two
+  opportunities, zero appointments, and 14 sanitized events. Retained n8n execution `2096` was not
+  rerun.
 
 See `docs/phase-6-verification.md` and `docs/phase-6-self-review.md` for the official documentation
 source record, contract details, tests, security review, and limitations. Never present the
@@ -252,12 +280,14 @@ unchanged. The self-contained browser-first walkthrough is
 `docs/interview-demo-runbook.md`; it includes the `272`/`276`/`283` distinction and the Phase 5
 Make `1614`/`1627`/`1654` debugging story.
 
-HighLevel live integration remains unverified. `DevelopmentCRMProvider` remains a distinct local
-implementation; the Phase 6 adapter and simulator are an optional, explicitly non-live path.
+HighLevel live integration remains unverified. `DevelopmentCRMProvider` remains the distinct local
+Lead/follow-up/audit persistence implementation; the Phase 6 adapter is a separate contact and
+opportunity HTTP projection to explicitly local test infrastructure. Automatic lifecycle-stage
+and appointment synchronization are not wired.
 
-The remaining Phase 7 work is screenshot selection/redaction, final README case-study polish,
-browser rehearsal, and rebuilding the final interview PDF. Do not treat those deliverables as
-complete.
+The remaining Phase 7B work is screenshot selection/redaction, Google Sheets dashboard polish,
+final README case-study polish, browser rehearsal, and rebuilding the final interview PDF. Do not
+treat those deliverables as complete.
 
 ### HVAC business wording and email polish
 

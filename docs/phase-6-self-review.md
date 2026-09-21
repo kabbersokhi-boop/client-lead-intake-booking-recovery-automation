@@ -42,10 +42,22 @@ for that conflict.
 
 A later falsification pass found that checking only email when both email and phone were supplied
 still left a phone-only duplicate exposed to vendor matching. Reconciliation now queries both
-documented exact identifiers, merges results by contact ID, and rejects a foreign match on either
-identifier before any upsert. The simulator also rejects non-E.164 phone lookup and undocumented
-opportunity statuses. A proposed rejection of documented `all` was discarded after
-rechecking the current official create/update pages.
+documented exact identifiers independently. Every non-empty result must identify exactly one
+contact with the expected submission/correlation fields, and every supplied identifier must
+converge on the same contact ID. A split email/phone identity, foreign match, or ambiguous result
+fails before upsert; one absent identifier plus one exact expected match safely reuses the known
+contact without rewriting it. The simulator also rejects non-E.164 phone lookup and undocumented
+opportunity statuses. A proposed rejection of documented `all` was discarded after rechecking the
+current official create/update pages.
+
+### Simulator mode must be structurally local
+
+Mode naming alone did not prevent `highlevel_simulator` from accepting an arbitrary external base
+URL. Settings now require plain HTTP with an explicit port on exact hosts
+`highlevel-simulator`, `localhost`, `127.0.0.1`, or `[::1]`; userinfo, paths, queries, fragments,
+deceptive host suffixes, numeric host aliases, HTTPS, and missing ports fail configuration.
+`HighLevelClient` also disables environment proxy discovery. The existing Compose service URL
+continues to work while a vendor URL cannot be selected in simulator mode.
 
 ### Phone mapping must be symmetric
 
@@ -87,6 +99,21 @@ and ten 100-opportunity pages, rejects repeated/malformed cursors and cross-page
 identities, and fails closed if either bounded search window is exhausted. Regressions place the
 expected contact and opportunity on page two and a conflicting opportunity across page boundaries.
 
+### Opportunity filters can hide identity conflicts
+
+Searching by expected contact and pipeline before inspecting the stable submission field could
+hide the same submission identity on a wrong contact or pipeline and then create a second logical
+opportunity. Reconciliation now scans bounded location-scoped pages, locates submission identity,
+and only then validates contact and pipeline linkage. Missing response containers, malformed
+pagination metadata, or absent/malformed custom-field structures fail as upstream contract errors
+rather than being treated as safe absence.
+
+### Provider exceptions must remain normal exceptions
+
+`HighLevelProviderError` was a frozen dataclass. A real unexpected propagation path showed Python
+context-manager traceback assignment could raise `FrozenInstanceError`, obscuring the actual
+provider failure. The exception remains a dataclass for normalized fields but is no longer frozen.
+
 ### Runtime mode must survive a clean Compose recreate
 
 The final targeted rebuild exposed that the previous simulator mode/token had been inherited from
@@ -101,6 +128,7 @@ deterministic suite independent from protected runtime configuration.
 ## Security review
 
 - Simulator and backend browser ports bind only to `127.0.0.1`.
+- Simulator mode rejects non-local HTTP targets and ignores environment proxy settings.
 - PostgreSQL retains no host port; n8n remains loopback-bound in the preserved runtime.
 - The simulator token and adapter token are environment-only; `.env.example` contains placeholders.
 - API Events are produced from a positive field allowlist and never receive or serialize request headers.
@@ -116,11 +144,14 @@ deterministic suite independent from protected runtime configuration.
 - repeated intake and direct provider replay;
 - stable application identity and conflicting payload;
 - contact duplicate with foreign submission identity;
+- split email/phone identity and ambiguous identifier matches;
+- deceptive/external simulator targets;
 - missing contact/opportunity reconciliation;
 - 401/403 classification and credential pause compatibility;
 - 429 raw delay preservation;
 - 500/network/timeout ambiguity;
 - malformed 2xx response;
+- malformed opportunity identity and pagination structures;
 - strict extra-field rejection;
 - one-shot fault reset, including timeout;
 - event-log authorization redaction;
@@ -132,29 +163,28 @@ deterministic suite independent from protected runtime configuration.
 
 ## Final review result
 
-The complete diff and runtime review found and fixed nine material issues. First, upsert originally
-ran before
-stable duplicate reconciliation, so vendor duplicate matching could have overwritten application
-identity on an unrelated contact; lookup now precedes every upsert. Second, an email-first lookup
-did not cover a separate phone duplicate; every supplied exact identifier is now checked. Third,
-the normalized HighLevel 401/403 class blocked its own job but did not activate the established
-global credential pause; the pause now recognizes it. Fourth, formatted phone values used
-different lookup/write representations; the mapping is now symmetric E.164. Fifth, completed
-intake replay reacquired upstream failure risk; it now returns canonical local state without
-another HTTP call. Sixth, contact and opportunity reconciliation treated page-one absence as
-global absence; both now follow bounded documented pagination. Seventh, opportunity pagination
-could return the first stable match before detecting the same identity on a later page; it now
-scans through termination and rejects cross-page duplicates. All corrections have dedicated
-regressions. Eighth, simulator mode/token were session-only and a clean recreate fell back to
-development; protected ignored configuration now makes the local runtime mode explicit, while
-test bootstrap explicitly isolates deterministic tests from that runtime mode. Ninth, an
-opportunity carrying the correct stable field could be accepted without independently confirming
-its contact/location/pipeline linkage; reconciliation and stage acknowledgement now reject that
-contradiction.
+The earlier Phase 6 review fixed nine material issues: pre-upsert duplicate safety, checking both
+identifiers, global credential pause, symmetric phone mapping, local-only completed replay,
+contact/opportunity pagination, cross-page duplicate detection, durable runtime mode configuration,
+and opportunity linkage acknowledgement.
 
-The deterministic verifier passes 126 Python, 28 frontend/helper, and 43 workflow tests (197
+This senior correction found six further material issues and one presentation ambiguity. Split
+email/phone matches could still select the one contact carrying expected custom fields; identifier
+results now must independently prove and converge on one identity. Simulator mode accepted an
+arbitrary base URL; it is now restricted to exact local HTTP targets and ignores proxy settings.
+Opportunity filtering could hide the same submission on a wrong contact/pipeline, and malformed
+custom-field/search metadata could be mistaken for absence; bounded reconciliation now scans the
+location first and fails malformed structures closed. A frozen provider exception could obscure a
+real error with `FrozenInstanceError`; it is now a normal mutable exception object. The official
+appointment-create page had moved to v3 while docs retained the obsolete version rationale; the
+source record and omission rationale are now current. Finally, the README diagram placed the
+optional adapter under booking/follow-up, implying lifecycle synchronization that does not exist;
+the diagram and booking wording now identify it as intake/recovery projection only.
+
+The deterministic verifier passes 153 Python, 28 frontend/helper, and 43 workflow tests (224
 total), plus Ruff, simulator JavaScript syntax, JSON and shell checks, Compose validation, diff
 checking, and tracked-content secret scanning. Live-local inspection confirmed two stable contacts
 and two opportunities for two synthetic submissions, one completed replay with zero external
-requests, one consumed 429 with `Retry-After: 3`, successful n8n recovery execution `2096`, zero external
-appointments, Normal final fault state, and preserved historical execution evidence.
+requests, one simulator-only 429 with `Retry-After: 3`, zero external appointments, Normal final
+fault state, unchanged durable counts, and preserved historical execution evidence. Existing n8n
+recovery execution `2096` remains the earlier end-to-end recovery proof and was not rerun.

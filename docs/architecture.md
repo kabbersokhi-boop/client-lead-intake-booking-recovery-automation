@@ -7,7 +7,8 @@
 | Browser form | Captures a manual synthetic enquiry and optional business-local appointment, creates UUID request identities, and retains an unchanged pending identity after an ambiguous outcome. |
 | n8n | Owns intake, scheduled follow-up, and booking orchestration while calling narrow development CRM/domain boundaries. |
 | NVIDIA NIM | Performs bounded extraction from the original message only. |
-| Development CRM adapter | Validates n8n contracts, persists leads, applies transactional booking state, and sends development email to Mailpit. It is not GoHighLevel. |
+| DevelopmentCRMProvider | Persists the authoritative local Lead, initial FollowUp, and creation audit state. It is not GoHighLevel. |
+| Lifecycle service | Owns transactional booking/follow-up state and the development email boundary to Mailpit. |
 | HighLevel adapter | Optional HighLevel-specific HTTP projection for the documented contact/opportunity subset. It composes local persistence rather than replacing PostgreSQL reliability truth. |
 | HighLevel Contract Simulator | Separate loopback-only HTTP service and interview UI. It is local test infrastructure, not HighLevel or a vendor sandbox. |
 | PostgreSQL | Stores lead, follow-up, appointment, source/server timestamp, idempotency, and audit state by correlation ID. |
@@ -63,6 +64,9 @@ The safe default remains `DevelopmentCRMProvider` plus the existing lifecycle an
 recovery services. Optional `highlevel_simulator` mode preserves that local persistence and adds a
 separate HighLevel-specific HTTP projection to the local contract simulator. `highlevel_live`
 fails closed. No live vendor CRM, real calendar, or external email provider is configured.
+
+Simulator mode accepts only exact local HTTP hosts with an explicit port and does not use
+environment proxy settings. It cannot be configured with an arbitrary external/vendor URL.
 
 The simulator implements only contact upsert/read/lookup and opportunity search/create/update.
 Automatic lifecycle and appointment synchronization are omitted because they require a durable

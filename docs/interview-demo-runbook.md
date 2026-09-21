@@ -95,6 +95,8 @@ This is a UI-only optional segment. Do not use Codex or a terminal during the in
 
 ## Honest scope statement
 
-The current CRM boundary is `DevelopmentCRMProvider`. GoHighLevel live integration was not
-started or claimed. The synthetic appointment calendar does not reserve external service
-capacity, and Mailpit does not prove production email delivery.
+`DevelopmentCRMProvider` remains the authoritative local persistence implementation. Optional
+simulator mode adds a separate HighLevel-specific contact/opportunity HTTP projection; live
+HighLevel integration, automatic lifecycle-stage synchronization, and appointment synchronization
+are not claimed. The synthetic appointment calendar does not reserve external service capacity,
+and Mailpit does not prove production email delivery.

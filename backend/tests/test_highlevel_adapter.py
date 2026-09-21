@@ -53,7 +53,7 @@ def lead_payload(**changes) -> CRMLeadCreate:
 def highlevel_settings(**changes) -> Settings:
     values = {
         "crm_provider_mode": "highlevel_simulator",
-        "highlevel_base_url": "http://simulator.test",
+        "highlevel_base_url": "http://127.0.0.1:18080",
         "highlevel_token": SecretStr("local-test-token"),
         "highlevel_timeout_seconds": 0.1,
     }
@@ -68,6 +68,8 @@ class ContractBackend:
         self.opportunities: dict[str, dict] = {}
         self.failure_status: int | None = None
         self.malformed = False
+        self.malformed_opportunity_meta = False
+        self.network_error = False
 
     @staticmethod
     def _request_fields(body: dict) -> list[dict]:
@@ -81,6 +83,8 @@ class ContractBackend:
         assert request.headers["Authorization"] == "Bearer local-test-token"
         assert request.headers["Version"] == "v3"
         assert request.headers["Accept"] == "application/json"
+        if self.network_error:
+            raise httpx.ConnectError("controlled", request=request)
         if self.failure_status:
             headers = {"Retry-After": "7"} if self.failure_status == 429 else {}
             return httpx.Response(
@@ -97,7 +101,8 @@ class ContractBackend:
                 (
                     contact
                     for contact in self.contacts.values()
-                    if contact.get("email") == body.get("email")
+                    if contact.get("email", "").casefold()
+                    == body.get("email", "").casefold()
                 ),
                 None,
             )
@@ -122,7 +127,10 @@ class ContractBackend:
                 matches = [
                     contact
                     for contact in self.contacts.values()
-                    if (email and contact.get("email") == email)
+                    if (
+                        email
+                        and contact.get("email", "").casefold() == email.casefold()
+                    )
                     or (phone and contact.get("phone") == phone)
                 ]
                 cursor = request.url.params.get("nextCursor")
@@ -137,10 +145,14 @@ class ContractBackend:
             return httpx.Response(200, json={"contact": self.contacts[contact_id]})
         if request.method == "GET" and request.url.path == "/opportunities/search":
             contact_id = request.url.params.get("contactId")
+            pipeline_id = request.url.params.get("pipelineId")
+            location_id = request.url.params.get("locationId")
             matches = [
                 opportunity
                 for opportunity in self.opportunities.values()
-                if opportunity["contactId"] == contact_id
+                if (contact_id is None or opportunity["contactId"] == contact_id)
+                and (pipeline_id is None or opportunity["pipelineId"] == pipeline_id)
+                and (location_id is None or opportunity["locationId"] == location_id)
             ]
             page = int(request.url.params.get("page", "1"))
             limit = int(request.url.params.get("limit", "20"))
@@ -149,7 +161,11 @@ class ContractBackend:
                 200,
                 json={
                     "opportunities": matches[start : start + limit],
-                    "meta": {"total": len(matches), "currentPage": page},
+                    "meta": (
+                        "not-an-object"
+                        if self.malformed_opportunity_meta
+                        else {"total": len(matches), "currentPage": page}
+                    ),
                     "aggregations": {},
                 },
             )
@@ -173,6 +189,34 @@ def configured_client(backend: ContractBackend) -> HighLevelClient:
     return HighLevelClient(
         highlevel_settings(), transport=httpx.MockTransport(backend)
     )
+
+
+def contact_record(
+    payload: CRMLeadCreate,
+    contact_id: str,
+    *,
+    email: str,
+    phone: str,
+    submission_id: uuid.UUID | None = None,
+    correlation_id: uuid.UUID | None = None,
+) -> dict:
+    return {
+        "id": contact_id,
+        "name": payload.full_name,
+        "email": email,
+        "phone": phone,
+        "locationId": "sim_location_reference",
+        "customFields": [
+            {
+                "id": "sim_cf_submission_id",
+                "value": str(submission_id or payload.submission_id),
+            },
+            {
+                "id": "sim_cf_correlation_id",
+                "value": str(correlation_id or payload.correlation_id),
+            },
+        ],
+    }
 
 
 def test_documented_contact_and_opportunity_mapping_and_reconciliation():
@@ -234,6 +278,36 @@ def test_provider_replay_keeps_one_local_and_one_external_business_effect(db):
     assert provider.lookup_lead(db, payload.submission_id).lead.id == first.lead.id
 
 
+@pytest.mark.parametrize(
+    "upstream_state",
+    ["unauthorized", "rate_limited", "server_error", "malformed", "network_error"],
+)
+def test_completed_provider_replay_never_reacquires_upstream_risk(db, upstream_state):
+    backend = ContractBackend()
+    provider = HighLevelCRMProvider(
+        highlevel_settings(), client=configured_client(backend)
+    )
+    payload = lead_payload()
+    created = provider.create_lead(db, payload)
+    request_count = len(backend.requests)
+    if upstream_state == "malformed":
+        backend.malformed = True
+    elif upstream_state == "network_error":
+        backend.network_error = True
+    else:
+        backend.failure_status = {
+            "unauthorized": 401,
+            "rate_limited": 429,
+            "server_error": 500,
+        }[upstream_state]
+
+    replayed = provider.replay_lead(db, payload)
+
+    assert replayed.created is False
+    assert replayed.lead.id == created.lead.id
+    assert len(backend.requests) == request_count
+
+
 def test_same_submission_with_conflicting_payload_stops_before_external_rewrite(db):
     backend = ContractBackend()
     provider = HighLevelCRMProvider(
@@ -266,7 +340,7 @@ def test_external_identity_conflict_is_not_treated_as_absence():
         ],
     }
 
-    with pytest.raises(HighLevelProviderError, match="different submission") as captured:
+    with pytest.raises(HighLevelProviderError, match="different application") as captured:
         client.reconcile(payload)
 
     assert captured.value.status_code == 409
@@ -289,7 +363,7 @@ def test_sync_refuses_foreign_duplicate_before_upsert():
         ],
     }
 
-    with pytest.raises(HighLevelProviderError, match="different submission"):
+    with pytest.raises(HighLevelProviderError, match="different application"):
         client.sync_lead(payload)
 
     assert not any(
@@ -299,6 +373,26 @@ def test_sync_refuses_foreign_duplicate_before_upsert():
     assert backend.contacts["sim_contact_foreign"]["customFields"][0]["value"] != str(
         payload.submission_id
     )
+
+
+def test_email_case_difference_cannot_bypass_foreign_identity_conflict():
+    backend = ContractBackend()
+    client = configured_client(backend)
+    payload = lead_payload()
+    backend.contacts["sim_contact_foreign"] = contact_record(
+        payload,
+        "sim_contact_foreign",
+        email=str(payload.email).upper(),
+        phone="+16045550991",
+        submission_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(HighLevelProviderError) as captured:
+        client.sync_lead(payload)
+
+    assert captured.value.error_class == "highlevel_identity_conflict"
+    assert not any(request.method == "POST" for request in backend.requests)
 
 
 def test_sync_checks_phone_duplicate_even_when_email_is_present():
@@ -317,7 +411,7 @@ def test_sync_checks_phone_duplicate_even_when_email_is_present():
         ],
     }
 
-    with pytest.raises(HighLevelProviderError, match="different submission"):
+    with pytest.raises(HighLevelProviderError, match="different application"):
         client.sync_lead(payload)
 
     lookup_queries = [
@@ -328,6 +422,103 @@ def test_sync_checks_phone_duplicate_even_when_email_is_present():
     assert any(query.get("email") == str(payload.email) for query in lookup_queries)
     assert any(query.get("phone") == payload.phone for query in lookup_queries)
     assert not any(request.method == "POST" for request in backend.requests)
+
+
+@pytest.mark.parametrize("correct_identifier", ["email", "phone"])
+def test_split_identifiers_fail_when_one_match_has_foreign_identity(correct_identifier):
+    backend = ContractBackend()
+    client = configured_client(backend)
+    payload = lead_payload()
+    correct_email = (
+        str(payload.email) if correct_identifier == "email" else "other@example.com"
+    )
+    correct_phone = payload.phone if correct_identifier == "phone" else "+16045550991"
+    backend.contacts["sim_contact_correct"] = contact_record(
+        payload,
+        "sim_contact_correct",
+        email=correct_email,
+        phone=correct_phone,
+    )
+    backend.contacts["sim_contact_foreign"] = contact_record(
+        payload,
+        "sim_contact_foreign",
+        email=("foreign@example.com" if correct_identifier == "email" else str(payload.email)),
+        phone=(payload.phone if correct_identifier == "email" else "+16045550992"),
+        submission_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(HighLevelProviderError) as captured:
+        client.sync_lead(payload)
+
+    assert captured.value.error_class == "highlevel_identity_conflict"
+    assert not any(request.method == "POST" for request in backend.requests)
+
+
+def test_both_identifiers_resolving_to_same_application_contact_succeed():
+    backend = ContractBackend()
+    client = configured_client(backend)
+    payload = lead_payload()
+    backend.contacts["sim_contact_expected"] = contact_record(
+        payload,
+        "sim_contact_expected",
+        email=str(payload.email),
+        phone=payload.phone,
+    )
+
+    client.sync_lead(payload)
+
+    assert len(backend.contacts) == 1
+    assert len(backend.opportunities) == 1
+    assert not any(
+        request.method == "POST" and request.url.path == "/contacts/upsert"
+        for request in backend.requests
+    )
+
+
+def test_multiple_contacts_for_one_identifier_are_an_identity_conflict():
+    backend = ContractBackend()
+    client = configured_client(backend)
+    payload = lead_payload()
+    backend.contacts["sim_contact_expected"] = contact_record(
+        payload,
+        "sim_contact_expected",
+        email=str(payload.email),
+        phone="+16045550991",
+    )
+    backend.contacts["sim_contact_duplicate"] = contact_record(
+        payload,
+        "sim_contact_duplicate",
+        email=str(payload.email),
+        phone="+16045550992",
+    )
+
+    with pytest.raises(HighLevelProviderError) as captured:
+        client.sync_lead(payload)
+
+    assert captured.value.error_class == "highlevel_identity_conflict"
+    assert "ambiguous" in captured.value.safe_message
+
+
+def test_one_identifier_absent_and_other_correct_reuses_known_contact():
+    backend = ContractBackend()
+    client = configured_client(backend)
+    payload = lead_payload()
+    backend.contacts["sim_contact_expected"] = contact_record(
+        payload,
+        "sim_contact_expected",
+        email=str(payload.email),
+        phone="+16045550991",
+    )
+
+    client.sync_lead(payload)
+
+    assert len(backend.contacts) == 1
+    assert len(backend.opportunities) == 1
+    assert not any(
+        request.method == "POST" and request.url.path == "/contacts/upsert"
+        for request in backend.requests
+    )
 
 
 def test_formatted_phone_is_normalized_for_lookup_upsert_and_replay():
@@ -429,19 +620,6 @@ def test_opportunity_reconciliation_finds_stable_identity_on_second_page():
     client = configured_client(backend)
     payload = lead_payload()
     contact_id = "sim_contact_paginated"
-    for index in range(20):
-        foreign_contact_id = f"sim_contact_foreign_{index}"
-        backend.contacts[foreign_contact_id] = {
-            "id": foreign_contact_id,
-            "name": "Foreign identity",
-            "email": str(payload.email),
-            "phone": f"+16045550{index:03d}",
-            "locationId": "sim_location_reference",
-            "customFields": [
-                {"id": "sim_cf_submission_id", "value": str(uuid.uuid4())},
-                {"id": "sim_cf_correlation_id", "value": str(uuid.uuid4())},
-            ],
-        }
     backend.contacts[contact_id] = {
         "id": contact_id,
         "name": payload.full_name,
@@ -458,6 +636,8 @@ def test_opportunity_reconciliation_finds_stable_identity_on_second_page():
         backend.opportunities[opportunity_id] = {
             "id": opportunity_id,
             "contactId": contact_id,
+            "locationId": "sim_location_reference",
+            "pipelineId": "sim_pipeline_hvac",
             "customFields": [
                 {"id": "sim_of_submission_id", "value": str(uuid.uuid4())}
             ],
@@ -482,12 +662,6 @@ def test_opportunity_reconciliation_finds_stable_identity_on_second_page():
         if request.url.path == "/opportunities/search"
     ]
     assert opportunity_pages == ["1", "2"]
-    email_lookups = [
-        request.url.params.get("nextCursor")
-        for request in backend.requests
-        if request.url.path == "/contacts/lookup" and request.url.params.get("email")
-    ]
-    assert email_lookups == [None, "sim_cursor_20"]
 
 
 def test_opportunity_reconciliation_rejects_duplicate_identity_across_pages():
@@ -536,6 +710,54 @@ def test_opportunity_reconciliation_rejects_conflicting_pipeline_linkage():
     assert captured.value.error_class == "highlevel_identity_conflict"
 
 
+def test_opportunity_reconciliation_rejects_same_identity_on_wrong_contact():
+    backend = ContractBackend()
+    client = configured_client(backend)
+    payload = lead_payload()
+    client.sync_lead(payload)
+    opportunity = next(iter(backend.opportunities.values()))
+    opportunity["contactId"] = "sim_contact_foreign"
+
+    with pytest.raises(HighLevelProviderError) as captured:
+        client.reconcile(payload)
+
+    assert captured.value.error_class == "highlevel_identity_conflict"
+    searches = [
+        request
+        for request in backend.requests
+        if request.url.path == "/opportunities/search"
+    ]
+    assert searches[-1].url.params.get("contactId") is None
+    assert searches[-1].url.params.get("pipelineId") is None
+
+
+def test_opportunity_reconciliation_rejects_malformed_pagination_metadata():
+    backend = ContractBackend()
+    client = configured_client(backend)
+    payload = lead_payload()
+    client.sync_lead(payload)
+    backend.malformed_opportunity_meta = True
+
+    with pytest.raises(HighLevelProviderError) as captured:
+        client.reconcile(payload)
+
+    assert captured.value.error_class == "highlevel_malformed_response"
+
+
+def test_opportunity_reconciliation_does_not_treat_missing_identity_data_as_absence():
+    backend = ContractBackend()
+    client = configured_client(backend)
+    payload = lead_payload()
+    client.sync_lead(payload)
+    opportunity = next(iter(backend.opportunities.values()))
+    opportunity.pop("customFields")
+
+    with pytest.raises(HighLevelProviderError) as captured:
+        client.reconcile(payload)
+
+    assert captured.value.error_class == "highlevel_malformed_response"
+
+
 def test_provider_modes_preserve_development_and_fail_closed_for_live():
     assert isinstance(
         build_crm_provider(Settings(_env_file=None, crm_provider_mode="development")),
@@ -543,6 +765,40 @@ def test_provider_modes_preserve_development_and_fail_closed_for_live():
     )
     with pytest.raises(RuntimeError, match="intentionally unavailable"):
         build_crm_provider(Settings(_env_file=None, crm_provider_mode="highlevel_live"))
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://highlevel-simulator:8080",
+        "http://localhost:18080",
+        "http://127.0.0.1:18080",
+        "http://[::1]:18080",
+    ],
+)
+def test_simulator_mode_allows_only_explicit_local_targets(base_url):
+    settings = highlevel_settings(highlevel_base_url=base_url)
+
+    assert settings.highlevel_base_url == base_url
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://services.leadconnectorhq.com:443",
+        "https://localhost:18080",
+        "http://localhost.example.com:18080",
+        "http://127.0.0.1.example.com:18080",
+        "http://user@localhost:18080",
+        "http://localhost:18080/contracts",
+        "http://localhost:18080?target=external",
+        "http://localhost",
+        "http://2130706433:18080",
+    ],
+)
+def test_simulator_mode_rejects_external_or_ambiguous_targets(base_url):
+    with pytest.raises(ValueError, match="highlevel_simulator"):
+        highlevel_settings(highlevel_base_url=base_url)
 
 
 def test_durable_recovery_owns_429_retry_and_reconciles_before_rewrite(

@@ -1,5 +1,9 @@
-from pydantic import SecretStr
+from urllib.parse import urlsplit
+
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+SIMULATOR_HOSTS = {"highlevel-simulator", "localhost", "127.0.0.1", "::1"}
 
 
 class Settings(BaseSettings):
@@ -31,6 +35,36 @@ class Settings(BaseSettings):
     crm_retry_fallback_seconds: int = 10
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @model_validator(mode="after")
+    def validate_highlevel_simulator_target(self):
+        if self.crm_provider_mode != "highlevel_simulator":
+            return self
+        base_url = self.highlevel_base_url
+        try:
+            parsed = urlsplit(base_url)
+            port = parsed.port
+        except ValueError as error:
+            raise ValueError(
+                "HIGHLEVEL_BASE_URL is invalid for highlevel_simulator mode."
+            ) from error
+        if (
+            base_url != base_url.strip()
+            or parsed.scheme != "http"
+            or parsed.hostname not in SIMULATOR_HOSTS
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or port is None
+        ):
+            raise ValueError(
+                "highlevel_simulator requires an explicit-port HTTP URL on "
+                "highlevel-simulator, localhost, 127.0.0.1, or [::1], with no "
+                "userinfo, path, query, or fragment."
+            )
+        return self
 
 
 settings = Settings()

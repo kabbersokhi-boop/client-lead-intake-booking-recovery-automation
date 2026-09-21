@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CONTRACT_VERSION = "v3"
-DOCUMENTATION_REVIEW_DATE = "2026-09-21"
+DOCUMENTATION_REVIEW_DATE = "2026-09-22"
 LOCATION_ID = "sim_location_reference"
 PIPELINE_ID = "sim_pipeline_hvac"
 STAGES = {
