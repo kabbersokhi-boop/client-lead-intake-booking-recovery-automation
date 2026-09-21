@@ -15,6 +15,9 @@ class CRMProvider(ABC):
     def create_lead(self, db: Session, payload: CRMLeadCreate) -> CreateLeadResult: ...
 
     @abstractmethod
+    def replay_lead(self, db: Session, payload: CRMLeadCreate) -> CreateLeadResult: ...
+
+    @abstractmethod
     def lookup_lead(
         self, db: Session, submission_id: uuid.UUID
     ) -> CreateLeadResult | None: ...
@@ -25,6 +28,9 @@ class DevelopmentCRMProvider(CRMProvider):
         self.service = DevelopmentCRMService()
 
     def create_lead(self, db: Session, payload: CRMLeadCreate) -> CreateLeadResult:
+        return self.service.create_lead(db, payload)
+
+    def replay_lead(self, db: Session, payload: CRMLeadCreate) -> CreateLeadResult:
         return self.service.create_lead(db, payload)
 
     def lookup_lead(

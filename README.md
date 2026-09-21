@@ -96,7 +96,7 @@ ruff check app tests
 
 Tests use SQLite for fast API/schema tests and disposable PostgreSQL for migration, persistence, and concurrent replay coverage. Node tests execute the exported n8n code-node logic with deterministic fixtures and browser retry helpers. They never call NVIDIA NIM or n8n. Public GitHub Actions provisions PostgreSQL and runs all deterministic tests without secrets.
 
-The established deterministic verifier currently runs 121 Python tests (SQLite and disposable PostgreSQL coverage), 28 frontend/helper tests, and 43 workflow-code/structure tests: 192 total. Live n8n, NVIDIA, Mailpit, Make, and local simulator checks remain separately identified evidence rather than silently mocked. The frontend/helper count is not a claim that every check drives a real browser, and the Python count is not a claim that every test is PostgreSQL-specific.
+The established deterministic verifier currently runs 126 Python tests (SQLite and disposable PostgreSQL coverage), 28 frontend/helper tests, and 43 workflow-code/structure tests: 197 total. Live n8n, NVIDIA, Mailpit, Make, and local simulator checks remain separately identified evidence rather than silently mocked. The frontend/helper count is not a claim that every check drives a real browser, and the Python count is not a claim that every test is PostgreSQL-specific.
 
 ## Live verification
 

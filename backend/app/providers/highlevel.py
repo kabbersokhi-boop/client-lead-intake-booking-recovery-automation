@@ -125,7 +125,7 @@ class HighLevelClient:
         return None
 
     @staticmethod
-    def _phone_for_lookup(phone: str | None) -> str | None:
+    def _phone_for_contract(phone: str | None) -> str | None:
         if not phone:
             return None
         normalized = "+" + re.sub(r"\D", "", phone) if phone.strip().startswith("+") else phone
@@ -133,7 +133,7 @@ class HighLevelClient:
             raise HighLevelProviderError(
                 422,
                 "highlevel_phone_validation",
-                "Phone-only HighLevel reconciliation requires an E.164 phone number.",
+                "HighLevel reconciliation requires supplied phone numbers to use E.164 format.",
             )
         return normalized
 
@@ -160,7 +160,7 @@ class HighLevelClient:
         if payload.email:
             body["email"] = str(payload.email)
         if payload.phone:
-            body["phone"] = payload.phone
+            body["phone"] = self._phone_for_contract(payload.phone)
         return body
 
     def _opportunity_payload(self, payload: CRMLeadCreate, contact_id: str) -> dict[str, Any]:
@@ -195,38 +195,60 @@ class HighLevelClient:
         if payload.email:
             identifiers.append(("email", str(payload.email)))
         if payload.phone:
-            identifiers.append(("phone", self._phone_for_lookup(payload.phone)))
+            identifiers.append(("phone", self._phone_for_contract(payload.phone)))
         contacts_by_id: dict[str, dict[str, Any]] = {}
         for identifier, value in identifiers:
-            body = self._request(
-                "GET",
-                "/contacts/lookup",
-                params={
+            next_cursor = None
+            seen_cursors: set[str] = set()
+            for _ in range(50):
+                params = {
                     "locationId": self.settings.highlevel_location_id,
                     identifier: value,
                     "limit": 20,
-                },
-            )
-            contacts = body.get("contacts")
-            if not isinstance(contacts, list):
-                raise HighLevelProviderError(
-                    502,
-                    "highlevel_malformed_response",
-                    "HighLevel returned a malformed contact lookup response.",
-                )
-            for contact in contacts:
-                if (
-                    not isinstance(contact, dict)
-                    or not isinstance(contact.get("id"), str)
-                    or contact.get("locationId")
-                    != self.settings.highlevel_location_id
-                ):
+                }
+                if next_cursor is not None:
+                    params["nextCursor"] = next_cursor
+                body = self._request("GET", "/contacts/lookup", params=params)
+                contacts = body.get("contacts")
+                if not isinstance(contacts, list):
                     raise HighLevelProviderError(
                         502,
                         "highlevel_malformed_response",
                         "HighLevel returned a malformed contact lookup response.",
                     )
-                contacts_by_id[contact["id"]] = contact
+                for contact in contacts:
+                    if (
+                        not isinstance(contact, dict)
+                        or not isinstance(contact.get("id"), str)
+                        or contact.get("locationId")
+                        != self.settings.highlevel_location_id
+                    ):
+                        raise HighLevelProviderError(
+                            502,
+                            "highlevel_malformed_response",
+                            "HighLevel returned a malformed contact lookup response.",
+                        )
+                    contacts_by_id[contact["id"]] = contact
+                next_cursor = body.get("nextCursor")
+                if next_cursor is None:
+                    break
+                if (
+                    not isinstance(next_cursor, str)
+                    or not next_cursor
+                    or next_cursor in seen_cursors
+                ):
+                    raise HighLevelProviderError(
+                        502,
+                        "highlevel_malformed_response",
+                        "HighLevel returned a malformed contact lookup cursor.",
+                    )
+                seen_cursors.add(next_cursor)
+            else:
+                raise HighLevelProviderError(
+                    409,
+                    "highlevel_identity_conflict",
+                    "HighLevel contact reconciliation exceeded its bounded search window.",
+                )
         contacts = list(contacts_by_id.values())
         expected_submission = str(payload.submission_id)
         matching = [
@@ -265,41 +287,71 @@ class HighLevelClient:
     def _lookup_opportunity(
         self, payload: CRMLeadCreate, contact_id: str
     ) -> dict[str, Any] | None:
-        body = self._request(
-            "GET",
-            "/opportunities/search",
-            params={
-                "locationId": self.settings.highlevel_location_id,
-                "pipelineId": self.settings.highlevel_pipeline_id,
-                "contactId": contact_id,
-                "status": "all",
-                "limit": 100,
-            },
-        )
-        opportunities = body.get("opportunities")
-        if not isinstance(opportunities, list):
-            raise HighLevelProviderError(
-                502,
-                "highlevel_malformed_response",
-                "HighLevel returned a malformed opportunity search response.",
-            )
         expected_submission = str(payload.submission_id)
-        matching = [
-            opportunity
-            for opportunity in opportunities
-            if isinstance(opportunity, dict)
-            and self._field_value(
-                opportunity, self.settings.highlevel_opportunity_submission_field_id
+        match = None
+        for page in range(1, 11):
+            body = self._request(
+                "GET",
+                "/opportunities/search",
+                params={
+                    "locationId": self.settings.highlevel_location_id,
+                    "pipelineId": self.settings.highlevel_pipeline_id,
+                    "contactId": contact_id,
+                    "status": "all",
+                    "page": page,
+                    "limit": 100,
+                },
             )
-            == expected_submission
-        ]
-        if len(matching) > 1:
-            raise HighLevelProviderError(
-                409,
-                "highlevel_identity_conflict",
-                "Multiple HighLevel opportunities claim the same submission identity.",
-            )
-        return matching[0] if matching else None
+            opportunities = body.get("opportunities")
+            if not isinstance(opportunities, list):
+                raise HighLevelProviderError(
+                    502,
+                    "highlevel_malformed_response",
+                    "HighLevel returned a malformed opportunity search response.",
+                )
+            for opportunity in opportunities:
+                if not isinstance(opportunity, dict) or not isinstance(
+                    opportunity.get("id"), str
+                ):
+                    raise HighLevelProviderError(
+                        502,
+                        "highlevel_malformed_response",
+                        "HighLevel returned a malformed opportunity search response.",
+                    )
+                if (
+                    self._field_value(
+                        opportunity,
+                        self.settings.highlevel_opportunity_submission_field_id,
+                    )
+                    != expected_submission
+                ):
+                    continue
+                if (
+                    opportunity.get("contactId") != contact_id
+                    or opportunity.get("locationId")
+                    != self.settings.highlevel_location_id
+                    or opportunity.get("pipelineId")
+                    != self.settings.highlevel_pipeline_id
+                ):
+                    raise HighLevelProviderError(
+                        409,
+                        "highlevel_identity_conflict",
+                        "The HighLevel opportunity identity conflicts with its requested linkage.",
+                    )
+                if match is not None:
+                    raise HighLevelProviderError(
+                        409,
+                        "highlevel_identity_conflict",
+                        "Multiple HighLevel opportunities claim the same submission identity.",
+                    )
+                match = opportunity
+            if len(opportunities) < 100:
+                return match
+        raise HighLevelProviderError(
+            409,
+            "highlevel_identity_conflict",
+            "HighLevel opportunity reconciliation exceeded its bounded search window.",
+        )
 
     def reconcile(self, payload: CRMLeadCreate) -> bool:
         contact = self._lookup_contact(payload)
@@ -388,7 +440,11 @@ class HighLevelClient:
             },
         )
         opportunity = self._record(body, "opportunity")
-        if opportunity.get("pipelineStageId") != self.stage_id_for(pipeline_stage):
+        if (
+            opportunity.get("id") != opportunity_id
+            or opportunity.get("pipelineId") != self.settings.highlevel_pipeline_id
+            or opportunity.get("pipelineStageId") != self.stage_id_for(pipeline_stage)
+        ):
             raise HighLevelProviderError(
                 502,
                 "highlevel_malformed_response",
@@ -405,6 +461,9 @@ class HighLevelCRMProvider(CRMProvider):
         local_result = self.local_service.create_lead(db, payload)
         self.client.sync_lead(payload)
         return local_result
+
+    def replay_lead(self, db: Session, payload: CRMLeadCreate) -> CreateLeadResult:
+        return self.local_service.create_lead(db, payload)
 
     def lookup_lead(
         self, db: Session, submission_id: uuid.UUID

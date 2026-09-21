@@ -1,8 +1,13 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+os.environ["CRM_PROVIDER_MODE"] = "development"
+os.environ.pop("HIGHLEVEL_TOKEN", None)
 
 from app.config import settings
 from app.db.base import Base

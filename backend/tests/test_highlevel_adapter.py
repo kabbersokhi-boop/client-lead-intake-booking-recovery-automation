@@ -125,7 +125,14 @@ class ContractBackend:
                     if (email and contact.get("email") == email)
                     or (phone and contact.get("phone") == phone)
                 ]
-                return httpx.Response(200, json={"contacts": matches})
+                cursor = request.url.params.get("nextCursor")
+                start = int(cursor.removeprefix("sim_cursor_")) if cursor else 0
+                limit = int(request.url.params.get("limit", "20"))
+                page = matches[start : start + limit]
+                response = {"contacts": page}
+                if len(page) == limit:
+                    response["nextCursor"] = f"sim_cursor_{start + limit}"
+                return httpx.Response(200, json=response)
             contact_id = request.url.path.rsplit("/", 1)[-1]
             return httpx.Response(200, json={"contact": self.contacts[contact_id]})
         if request.method == "GET" and request.url.path == "/opportunities/search":
@@ -135,9 +142,16 @@ class ContractBackend:
                 for opportunity in self.opportunities.values()
                 if opportunity["contactId"] == contact_id
             ]
+            page = int(request.url.params.get("page", "1"))
+            limit = int(request.url.params.get("limit", "20"))
+            start = (page - 1) * limit
             return httpx.Response(
                 200,
-                json={"opportunities": matches, "meta": {}, "aggregations": {}},
+                json={
+                    "opportunities": matches[start : start + limit],
+                    "meta": {"total": len(matches), "currentPage": page},
+                    "aggregations": {},
+                },
             )
         if request.method == "POST" and request.url.path == "/opportunities/":
             body = json.loads(request.content)
@@ -316,6 +330,42 @@ def test_sync_checks_phone_duplicate_even_when_email_is_present():
     assert not any(request.method == "POST" for request in backend.requests)
 
 
+def test_formatted_phone_is_normalized_for_lookup_upsert_and_replay():
+    backend = ContractBackend()
+    client = configured_client(backend)
+    payload = lead_payload(phone="+1 (604) 555-0144")
+
+    client.sync_lead(payload)
+    client.sync_lead(payload)
+
+    phone_queries = [
+        request.url.params.get("phone")
+        for request in backend.requests
+        if request.url.path == "/contacts/lookup" and request.url.params.get("phone")
+    ]
+    contact_writes = [
+        json.loads(request.content)
+        for request in backend.requests
+        if request.method == "POST" and request.url.path == "/contacts/upsert"
+    ]
+    assert phone_queries == ["+16045550144", "+16045550144"]
+    assert [write["phone"] for write in contact_writes] == ["+16045550144"]
+    assert len(backend.contacts) == 1
+    assert len(backend.opportunities) == 1
+
+
+def test_non_e164_phone_is_rejected_before_any_external_request():
+    backend = ContractBackend()
+    client = configured_client(backend)
+
+    with pytest.raises(HighLevelProviderError) as captured:
+        client.sync_lead(lead_payload(phone="604-555-0144"))
+
+    assert captured.value.status_code == 422
+    assert captured.value.error_class == "highlevel_phone_validation"
+    assert backend.requests == []
+
+
 @pytest.mark.parametrize(
     ("status_code", "error_class", "retry_after"),
     [
@@ -372,6 +422,118 @@ def test_pipeline_stage_mapping_and_update_contract():
         "pipelineStageId": "sim_stage_appointment_booked",
         "status": "open",
     }
+
+
+def test_opportunity_reconciliation_finds_stable_identity_on_second_page():
+    backend = ContractBackend()
+    client = configured_client(backend)
+    payload = lead_payload()
+    contact_id = "sim_contact_paginated"
+    for index in range(20):
+        foreign_contact_id = f"sim_contact_foreign_{index}"
+        backend.contacts[foreign_contact_id] = {
+            "id": foreign_contact_id,
+            "name": "Foreign identity",
+            "email": str(payload.email),
+            "phone": f"+16045550{index:03d}",
+            "locationId": "sim_location_reference",
+            "customFields": [
+                {"id": "sim_cf_submission_id", "value": str(uuid.uuid4())},
+                {"id": "sim_cf_correlation_id", "value": str(uuid.uuid4())},
+            ],
+        }
+    backend.contacts[contact_id] = {
+        "id": contact_id,
+        "name": payload.full_name,
+        "email": str(payload.email),
+        "phone": payload.phone,
+        "locationId": "sim_location_reference",
+        "customFields": [
+            {"id": "sim_cf_submission_id", "value": str(payload.submission_id)},
+            {"id": "sim_cf_correlation_id", "value": str(payload.correlation_id)},
+        ],
+    }
+    for index in range(100):
+        opportunity_id = f"sim_opportunity_foreign_{index}"
+        backend.opportunities[opportunity_id] = {
+            "id": opportunity_id,
+            "contactId": contact_id,
+            "customFields": [
+                {"id": "sim_of_submission_id", "value": str(uuid.uuid4())}
+            ],
+        }
+    backend.opportunities["sim_opportunity_expected"] = {
+        "id": "sim_opportunity_expected",
+        "contactId": contact_id,
+        "locationId": "sim_location_reference",
+        "pipelineId": "sim_pipeline_hvac",
+        "customFields": [
+            {
+                "id": "sim_of_submission_id",
+                "value": str(payload.submission_id),
+            }
+        ],
+    }
+
+    assert client.reconcile(payload) is True
+    opportunity_pages = [
+        request.url.params.get("page")
+        for request in backend.requests
+        if request.url.path == "/opportunities/search"
+    ]
+    assert opportunity_pages == ["1", "2"]
+    email_lookups = [
+        request.url.params.get("nextCursor")
+        for request in backend.requests
+        if request.url.path == "/contacts/lookup" and request.url.params.get("email")
+    ]
+    assert email_lookups == [None, "sim_cursor_20"]
+
+
+def test_opportunity_reconciliation_rejects_duplicate_identity_across_pages():
+    backend = ContractBackend()
+    client = configured_client(backend)
+    payload = lead_payload()
+    client.sync_lead(payload)
+    contact_id = next(iter(backend.contacts))
+    opportunity = next(iter(backend.opportunities.values()))
+    expected_id = next(iter(backend.opportunities))
+    for index in range(99):
+        foreign_id = f"sim_opportunity_foreign_{index}"
+        backend.opportunities[foreign_id] = {
+            **opportunity,
+            "id": foreign_id,
+            "customFields": [
+                {"id": "sim_of_submission_id", "value": str(uuid.uuid4())}
+            ],
+        }
+    duplicate_id = "sim_opportunity_duplicate"
+    backend.opportunities[duplicate_id] = {
+        **opportunity,
+        "id": duplicate_id,
+    }
+
+    with pytest.raises(HighLevelProviderError) as captured:
+        client.reconcile(payload)
+
+    assert captured.value.status_code == 409
+    assert captured.value.error_class == "highlevel_identity_conflict"
+    assert backend.opportunities[expected_id]["contactId"] == contact_id
+
+
+def test_opportunity_reconciliation_rejects_conflicting_pipeline_linkage():
+    backend = ContractBackend()
+    client = configured_client(backend)
+    payload = lead_payload()
+    client.sync_lead(payload)
+    opportunity = next(iter(backend.opportunities.values()))
+    opportunity["pipelineId"] = "sim_pipeline_wrong"
+
+    with pytest.raises(HighLevelProviderError) as captured:
+        client.reconcile(payload)
+
+    assert captured.value.status_code == 409
+    assert captured.value.error_class == "highlevel_identity_conflict"
 
 
 def test_provider_modes_preserve_development_and_fail_closed_for_live():
@@ -452,9 +614,12 @@ def test_durable_recovery_owns_429_retry_and_reconciles_before_rewrite(
     assert len(backend.contacts) == 1
     assert len(backend.opportunities) == 1
 
+    request_count = len(backend.requests)
+    backend.failure_status = 429
     replay_response = Response()
     routes.durable_intake(admission, replay_response, None, db)
     assert replay_response.status_code == 200
+    assert len(backend.requests) == request_count
     assert len(backend.contacts) == 1
     assert len(backend.opportunities) == 1
 

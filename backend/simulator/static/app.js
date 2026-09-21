@@ -13,6 +13,7 @@ const eventMarkup = (event) => {
   const statusClass = event.status >= 200 && event.status < 300 ? "status-ok" : "status-error";
   const detail = JSON.stringify({
     simulator_request_id: event.requestId,
+    retry_after: event.retryAfter,
     query: event.query,
     request: event.requestBody,
     response: event.responseBody,

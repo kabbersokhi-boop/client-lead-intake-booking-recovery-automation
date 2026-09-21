@@ -94,6 +94,12 @@ source label, `createNewIfDuplicateAllowed=false`, and configured custom fields 
 `submission_id` and `correlation_id`. The adapter reads the contact back by ID and rejects an
 acknowledgement that does not preserve those identities.
 
+Because the documented exact phone lookup requires E.164, a supplied plus-prefixed formatted
+number is compacted to E.164 for both lookup and upsert. A number that cannot be represented as
+E.164 is rejected before any external request rather than written in a form that cannot be safely
+reconciled. This is a project safety constraint, not a claim that contact upsert universally
+requires E.164.
+
 The adapter maps one open HVAC opportunity to the configured pipeline and `new_lead` stage, linked
 to the external contact. A configured opportunity custom field carries `submission_id`. The
 implemented stage table is:
@@ -127,10 +133,20 @@ supplied documented identifier: exact email and documented E.164 phone. A matchi
 carry the expected configured submission and correlation custom fields. A duplicate match on
 either identifier with different application identity is a conflict, not absence.
 
-Opportunity reconciliation searches by location, pipeline, and contact, then requires the stable
-submission custom field. Recovery performs this read path before another uncertain write. If the
-contact and opportunity already exist, the existing local Lead result completes the durable job;
-if either business effect is absent, the existing recovery workflow may authorize another write.
+Contact lookup follows the documented opaque cursor in bounded 20-record pages and rejects a
+repeated or malformed cursor. Opportunity reconciliation searches by location, pipeline, and
+contact, then requires the stable submission custom field. It follows documented page-number
+pagination in bounded 100-record pages, detects duplicate identity across pages, verifies the
+matching opportunity's contact/location/pipeline linkage, and refuses to infer absence beyond
+1,000 matching contacts or filtered opportunities. Recovery performs this read path before another
+uncertain write. If the contact and opportunity already exist, the existing local Lead result
+completes the durable job; if either business effect is absent, the existing recovery workflow may
+authorize another write.
+
+Once a durable job is completed, an unchanged intake replay returns the canonical local result
+without recontacting the upstream system. A fresh upstream 429 or timeout therefore cannot turn a
+previously confirmed customer replay into a new failure. Explicit recovery reconciliation remains
+the path for jobs whose external outcome is still uncertain.
 
 This is at-least-once delivery/retries with idempotent business effects and explicit
 reconciliation. It is not a universal exactly-once claim. The exact contact lookup endpoint is
@@ -150,9 +166,9 @@ bounded 1–30 second `Retry-After`, 500 Server Error, and Timeout. A non-normal
 its response is emitted, so even a client timeout cannot leave the fault silently armed.
 
 API Events records method, documented path, sanitized query/body/response, status, simulator
-request ID, timestamp, and intentionally propagated submission reference. Logging is allowlist
-based. Authorization, adapter keys, arbitrary headers, environment data, and private URLs are not
-stored or returned.
+request ID, timestamp, intentionally propagated submission reference, and only the allowlisted
+`Retry-After` response value. Logging is allowlist based. Authorization, adapter keys, arbitrary
+headers, environment data, and private URLs are not stored or returned.
 
 ## Deterministic coverage
 
@@ -162,7 +178,7 @@ rewrite, opportunity stage mapping, 401, 429 and `Retry-After`, 500, timeout, ma
 strict simulator validation, event redaction, one-shot reset, provider-mode truth, the unchanged
 development provider, and durable recovery ownership around a simulated 429.
 
-The complete verifier runs 121 Python tests, 28 frontend/helper tests, and 43 workflow tests: 192
+The complete verifier runs 126 Python tests, 28 frontend/helper tests, and 43 workflow tests: 197
 tests total. It also runs Ruff across the application, simulator, tests, and demo helper; checks
 simulator JavaScript syntax; parses tracked workflow/fixture JSON; checks shell syntax; validates
 Docker Compose; runs `git diff --check`; and scans tracked content for secret patterns.
@@ -172,24 +188,37 @@ Docker Compose; runs `git diff --check`; and scans tracked content for secret pa
 The final Phase 6 runtime used the separate healthy simulator container over Docker HTTP. The
 normal synthetic submission `e43a9631-3ba2-4acf-85cf-d3b7a1366f52` completed with local Lead
 `e0a8c654-3ca7-40da-90b6-731a1b37c92f` and exactly one logical external contact/opportunity.
-After rebuilding and resetting only the isolated simulator from final code, exact replay restored
-contact `sim_contact_e5a894882a2547d2` and opportunity `sim_opportunity_d533b972920844e0` while
-returning the same local Lead and creating no duplicate logical effect.
+After rebuilding and resetting only the isolated simulator from final code, the authenticated CRM
+boundary reprojected the stored canonical synthetic payload as contact
+`sim_contact_5559fcbdeb164d50` and opportunity `sim_opportunity_b5563a8d11fa45cf`. A subsequent
+completed durable replay returned the same local Lead with HTTP 200 while the simulator event
+count remained exactly 12, proving that confirmed replay added no upstream request.
 
 A separate request `ff09e6a2-2fa4-4508-b166-a6c90520c42a` consumed one synthetic 429 with
 `Retry-After: 3`. Its first attempt failed with `highlevel_rate_limited`; the fault reset to
 Normal. Existing active n8n recovery execution `2096` performed reconciliation, authorized the
 second write, and completed it with HTTP 200. Destination inspection found exactly contact
-and opportunity effects for that stable submission identity. Final exact-code replay after the
-isolated reset restored contact `sim_contact_694623499a4b47ea` and opportunity
-`sim_opportunity_521c5a5676b84f05`. A final adapter lookup consumed another one-shot 429 with
-`Retry-After: 3`, reset automatically, and the following reconciliation lookup returned 200.
+and opportunity effects for that stable submission identity. Final-code reprojection after the
+isolated reset produced contact `sim_contact_32d25c73c42243cd` and opportunity
+`sim_opportunity_6975db0213da4348`. A final adapter lookup consumed another one-shot 429 with
+`Retry-After: 3`, recorded simulator request `sim_req_5f28d86ff0c64946`, reset automatically,
+and the following reconciliation lookup returned 200.
 
-Final inspected simulator state: two contacts, two opportunities, zero appointments, 16 events,
+Final inspected simulator state: two contacts, two opportunities, zero appointments, 19 events,
 Normal fault mode, and no serialized Authorization field. Final PostgreSQL counts: 49 Leads, 5
 Appointments, 43 FollowUps, 38 CRMWriteJobs, 41 CRMWriteAttempts, and 3 RecoveryIncidents, with no
 active CRM fault. Backend, simulator, PostgreSQL, Mailpit, and the preserved n8n instance remained
 healthy.
+
+The final targeted rebuild initially exposed that simulator mode/token existed only in the prior
+shell environment, so Compose correctly fell back to `development`. This was rejected as invalid
+Phase 6 evidence. A new random token and explicit `CRM_PROVIDER_MODE=highlevel_simulator` were
+stored only in ignored local `.env`, the two services were recreated, mode/token presence was
+verified without printing the token, and every final runtime check above was rerun. Pytest
+bootstrap explicitly forces `development` before application import so deterministic verification
+does not inherit protected simulator configuration from `.env`. After the final linkage hardening,
+the rebuilt backend reconciled the stored submission with HTTP 200 and completed replay again
+added zero requests (19 events before and after).
 
 The preserved n8n state remained unchanged: intake, appointment booking, follow-up dispatch,
 recovery dispatch, and recovery error recording stayed active; controlled diagnostic and

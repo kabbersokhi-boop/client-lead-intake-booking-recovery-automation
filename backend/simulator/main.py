@@ -55,6 +55,8 @@ ALLOWED_EVENT_KEYS = {
     "statusCode",
     "error",
     "nextCursor",
+    "page",
+    "limit",
     "title",
 }
 
@@ -116,6 +118,7 @@ class SimulatorState:
         request_body: Any,
         status_code: int,
         response_body: Any,
+        retry_after: str | None = None,
     ) -> None:
         correlation = None
         if isinstance(request_body, dict):
@@ -131,6 +134,7 @@ class SimulatorState:
             "requestBody": allowlisted(request_body),
             "status": status_code,
             "responseBody": allowlisted(response_body),
+            "retryAfter": retry_after,
             "submissionReference": correlation,
         }
         with self.lock:
@@ -247,6 +251,8 @@ async def contract_boundary(request: Request, call_next):
     query = dict(request.query_params)
 
     async def finish(status_code: int, body: dict[str, Any], headers: dict | None = None):
+        response_headers = dict(headers or {})
+        response_headers["X-Simulator-Request-Id"] = request_id
         state.record(
             request_id=request_id,
             method=request.method,
@@ -255,8 +261,9 @@ async def contract_boundary(request: Request, call_next):
             request_body=request_body,
             status_code=status_code,
             response_body=body,
+            retry_after=response_headers.get("Retry-After"),
         )
-        return JSONResponse(body, status_code=status_code, headers=headers or {})
+        return JSONResponse(body, status_code=status_code, headers=response_headers)
 
     expected_token = os.environ.get("HIGHLEVEL_SIMULATOR_TOKEN", "")
     if not expected_token or request.headers.get("Authorization") != f"Bearer {expected_token}":
@@ -314,6 +321,7 @@ async def contract_boundary(request: Request, call_next):
         request_body=request_body,
         status_code=response.status_code,
         response_body=response_body,
+        retry_after=response.headers.get("Retry-After"),
     )
     headers = dict(response.headers)
     headers["X-Simulator-Request-Id"] = request_id
@@ -380,10 +388,14 @@ def lookup_contact(
         raise HTTPException(status_code=422, detail="exactly one of email or phone is required")
     if phone is not None and not re.fullmatch(r"\+[1-9]\d{6,14}", phone):
         raise HTTPException(status_code=422, detail="phone must use E.164 format")
+    start = 0
     if nextCursor is not None:
-        raise HTTPException(status_code=422, detail="this bounded simulator has one page")
+        match = re.fullmatch(r"sim_cursor_(\d+)", nextCursor)
+        if not match:
+            raise HTTPException(status_code=422, detail="nextCursor is invalid")
+        start = int(match.group(1))
     with state.lock:
-        contacts = [
+        matching = [
             contact
             for contact in state.contacts.values()
             if contact["locationId"] == locationId
@@ -391,8 +403,12 @@ def lookup_contact(
                 (email is not None and contact.get("email", "").casefold() == email.casefold())
                 or (phone is not None and contact.get("phone") == phone)
             )
-        ][:limit]
-    return {"contacts": contacts}
+        ]
+        contacts = matching[start : start + limit]
+    response: dict[str, Any] = {"contacts": contacts}
+    if len(contacts) == limit:
+        response["nextCursor"] = f"sim_cursor_{start + limit}"
+    return response
 
 
 @app.get("/contacts/{contact_id}")
@@ -410,22 +426,25 @@ def search_opportunities(
     pipelineId: str | None = None,
     contactId: str | None = None,
     status: Literal["open", "won", "lost", "abandoned", "all"] = "all",
+    page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> dict[str, Any]:
     if locationId != LOCATION_ID:
         raise HTTPException(status_code=422, detail="locationId is not configured")
     with state.lock:
-        opportunities = [
+        matching = [
             opportunity
             for opportunity in state.opportunities.values()
             if opportunity["locationId"] == locationId
             and (pipelineId is None or opportunity["pipelineId"] == pipelineId)
             and (contactId is None or opportunity["contactId"] == contactId)
             and (status == "all" or opportunity["status"] == status)
-        ][:limit]
+        ]
+        start = (page - 1) * limit
+        opportunities = matching[start : start + limit]
     return {
         "opportunities": opportunities,
-        "meta": {"total": len(opportunities), "currentPage": 1},
+        "meta": {"total": len(matching), "currentPage": page},
         "aggregations": {},
     }
 

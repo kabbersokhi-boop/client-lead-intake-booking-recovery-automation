@@ -10,8 +10,8 @@ Future phases must update this document before their final commit so the reposit
 - Phase 6 fallback starts from approved Phase 7A checkpoint `bfc4d88dbfb291b2dbcb52eb77e2ab6c2a13dd1b`.
 - Phase 6 implements a separate HighLevel HTTP adapter and loopback-only local contract simulator
   for the documented contact/opportunity subset. It is not a live integration or vendor sandbox.
-- Phase 6 deterministic verification: 121 Python tests, 28 frontend/helper tests, and 43
-  workflow tests (192 total), plus Ruff, simulator JavaScript/JSON/shell syntax, Compose
+- Phase 6 deterministic verification: 126 Python tests, 28 frontend/helper tests, and 43
+  workflow tests (197 total), plus Ruff, simulator JavaScript/JSON/shell syntax, Compose
   validation, `git diff --check`, and tracked-content secret scanning.
 - Phase 7A presentation-hardening implementation SHA: `235d1f55156820a1aa0a0b7416bf6a44a3533e4f`.
 - Phase 7A deterministic verification: 98 Python tests, 28 frontend/helper tests, and 43
@@ -214,23 +214,27 @@ prevent a foreign same-email/phone contact from being relabelled. Appointment an
 sync are omitted because a correct implementation needs a durable lifecycle-sync boundary and
 verified calendar/account IDs; Phase 2 booking was not weakened by an external call.
 
-Live-local evidence on 2026-09-21:
+Live-local evidence on 2026-09-21 through 2026-09-22:
 
 - Normal submission `e43a9631-3ba2-4acf-85cf-d3b7a1366f52` completed once locally and produced
   one contact and one opportunity. After rebuilding/resetting only the isolated simulator from
-  final code, exact replay restored contact `sim_contact_e5a894882a2547d2` and opportunity
-  `sim_opportunity_d533b972920844e0` without duplicating either logical effect.
+  final code, authenticated reprojection produced contact `sim_contact_5559fcbdeb164d50` and
+  opportunity `sim_opportunity_b5563a8d11fa45cf`. Completed durable replay returned the same Lead
+  with HTTP 200 and added zero simulator events (12 before and after).
 - A one-shot 429 for submission `ff09e6a2-2fa4-4508-b166-a6c90520c42a` preserved
   `Retry-After: 3`; active recovery execution `2096` reconciled and completed attempt 2, producing
-  exactly one logical contact and opportunity. Final exact-code replay restored contact
-  `sim_contact_694623499a4b47ea` and opportunity `sim_opportunity_521c5a5676b84f05`.
-- Simulator destination state held two contacts, two opportunities, zero appointments, 16
+  exactly one logical contact and opportunity. Final-code reprojection produced contact
+  `sim_contact_32d25c73c42243cd` and opportunity `sim_opportunity_6975db0213da4348`.
+- Simulator destination state held two contacts, two opportunities, zero appointments, 19
   sanitized API events, no serialized Authorization field, and fault mode Normal.
 - Durable counts after the controlled evidence were 49 Leads, 5 Appointments, 43 FollowUps, 38
   CRMWriteJobs, 41 CRMWriteAttempts, and 3 RecoveryIncidents; no CRM fault run was active.
 - The direct durable-intake route was used for the normal request to avoid an unnecessary NVIDIA
   call. Execution `2096` proves the preserved n8n recovery path through FastAPI, the adapter, and
   the external simulator service. No SMTP, booking, diagnostic injection, or real vendor call ran.
+- Final rebuild review caught session-only simulator configuration falling back safely to
+  `development`; ignored local `.env` now explicitly configures simulator mode and a fresh random
+  token, and all final runtime checks were rerun without printing that token.
 
 See `docs/phase-6-verification.md` and `docs/phase-6-self-review.md` for the official documentation
 source record, contract details, tests, security review, and limitations. Never present the

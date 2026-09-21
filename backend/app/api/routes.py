@@ -308,7 +308,7 @@ def durable_intake(
             status_code=409, detail="Stored recovery payload requires operator review."
         ) from error
     if job.state == "completed" and job.completed_lead_id:
-        result = provider.create_lead(db, canonical_payload)
+        result = provider.replay_lead(db, canonical_payload)
         response.status_code = 200
         return _crm_response(result).model_dump(mode="json")
     fault_run = _fault_run_for(db, admission.payload.submission_id, lock=False)

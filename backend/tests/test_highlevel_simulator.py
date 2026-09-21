@@ -19,7 +19,7 @@ def simulator_base_url():
     backend_dir = Path(__file__).resolve().parents[1]
     environment = {
         **os.environ,
-        "HIGHLEVEL_SIMULATOR_TOKEN": "simulator-test-token",
+        "HIGHLEVEL_SIMULATOR_TOKEN": "unit-token",
         "HIGHLEVEL_SIMULATOR_FAULT_TIMEOUT_SECONDS": "0.01",
     }
     process = subprocess.Popen(
@@ -67,7 +67,7 @@ def simulator(simulator_base_url):
 
 def headers(**changes):
     values = {
-        "Authorization": "Bearer simulator-test-token",
+        "Authorization": "Bearer unit-token",
         "Version": "v3",
     }
     values.update(changes)
@@ -124,6 +124,16 @@ def test_simulator_rejects_non_e164_lookup_and_undocumented_opportunity_status(
         params={"locationId": "sim_location_reference", "phone": "604-555-0177"},
     )
     assert lookup.status_code == 422
+    invalid_cursor = simulator.get(
+        "/contacts/lookup",
+        headers=headers(),
+        params={
+            "locationId": "sim_location_reference",
+            "email": "morgan.simulator@example.com",
+            "nextCursor": "not-a-simulator-cursor",
+        },
+    )
+    assert invalid_cursor.status_code == 422
 
     contact = create_contact(simulator).json()["contact"]
     opportunity = simulator.post(
@@ -198,6 +208,7 @@ def test_contact_upsert_lookup_and_opportunity_contract_are_replay_safe(simulato
         },
     )
     assert len(search.json()["opportunities"]) == 1
+    assert search.json()["meta"] == {"total": 1, "currentPage": 1}
 
 
 def test_one_shot_429_preserves_retry_after_and_resets(simulator):
@@ -209,9 +220,12 @@ def test_one_shot_429_preserves_retry_after_and_resets(simulator):
 
     assert rejected.status_code == 429
     assert rejected.headers["Retry-After"] == "9"
+    assert rejected.headers["X-Simulator-Request-Id"].startswith("sim_req_")
     assert accepted.status_code == 200
     snapshot = simulator.get("/simulator/api/state").json()
     assert snapshot["fault"]["mode"] == "normal"
+    rate_limit_event = next(event for event in snapshot["events"] if event["status"] == 429)
+    assert rate_limit_event["retryAfter"] == "9"
 
 
 @pytest.mark.parametrize(
@@ -241,7 +255,7 @@ def test_event_log_is_allowlisted_and_never_contains_authorization(simulator):
 
     assert snapshot["events"][0]["path"] == "/contacts/upsert"
     assert "Authorization" not in serialized
-    assert "simulator-test-token" not in serialized
+    assert "unit-token" not in serialized
     assert "headers" not in serialized
 
 
