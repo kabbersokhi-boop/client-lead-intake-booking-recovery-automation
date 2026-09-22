@@ -15,6 +15,27 @@ function runCode(name, input, references = {}, environment = {}) {
   });
 }
 
+function buildNvidiaRequest(environment = { NVIDIA_NIM_MODEL: "openai/gpt-oss-20b" }) {
+  const expression = nodes["Extract Service Context with NVIDIA NIM"].parameters.jsonBody;
+  assert.match(expression, /^=\{\{[\s\S]*\}\}$/);
+  return vm.runInNewContext(`(${expression.slice(3, -2)})`, {
+    $env: environment,
+    $: (nodeName) => ({ first: () => ({ json: { lead: { normalized_message: lead.normalized_message } } }) }),
+  });
+}
+
+test("NVIDIA request uses structured JSON and low reasoning within existing bounds", () => {
+  const request = buildNvidiaRequest();
+  const node = nodes["Extract Service Context with NVIDIA NIM"];
+  assert.match(node.parameters.jsonBody, /model: \$env\.NVIDIA_NIM_MODEL/);
+  assert.equal(request.model, "openai/gpt-oss-20b");
+  assert.equal(request.temperature, 0);
+  assert.equal(request.max_tokens, 180);
+  assert.equal(request.reasoning_effort, "low");
+  assert.equal(request.response_format.type, "json_object");
+  assert.equal(node.parameters.options.timeout, "={{ Number($env.NVIDIA_NIM_TIMEOUT_MS || 18000) }}");
+});
+
 const lead = {
   submission_id: "09f70a8e-1304-42b9-a1e6-022d2daf4bd6",
   correlation_id: "eeb1b11a-22c8-4a2f-a463-554246c14a16",
@@ -48,6 +69,7 @@ test("exported AI parsing accepts valid structured JSON", () => {
     { NVIDIA_NIM_MODEL: "example/model" },
   )[0].json.crmPayload;
   assert.equal(result.ai_status, "enriched");
+  assert.deepEqual(Object.keys(result.enrichment), ["service_type", "location", "preferred_time", "urgency", "summary"]);
   assert.equal(result.enrichment.location, "Surrey");
   assert.equal(result.provider_metadata.outcome_class, "enriched");
 });
@@ -57,6 +79,35 @@ test("exported AI parsing safely handles malformed JSON and missing keys", () =>
     const result = runCode(
       "Validate AI Extraction",
       { choices: [{ message: { content } }] },
+      { "Normalize Contact Data": { lead } },
+      { NVIDIA_NIM_MODEL: "example/model" },
+    )[0].json.crmPayload;
+    assert.equal(result.ai_status, "fallback_invalid");
+    assert.equal(result.needs_review, true);
+    assert.equal(result.enrichment, null);
+  }
+});
+
+test("exported AI parsing rejects extra keys, unsupported enums, and invalid field types", () => {
+  const valid = {
+    service_type: "furnace_service",
+    location: "Surrey",
+    preferred_time: "Tuesday afternoon",
+    urgency: "medium",
+    summary: "Older furnace is not heating.",
+  };
+  const invalid = [
+    { ...valid, unexpected: "extra" },
+    { ...valid, service_type: "roofing_service" },
+    { ...valid, urgency: "critical" },
+    { ...valid, location: 42 },
+    { ...valid, preferred_time: false },
+    { ...valid, summary: ["not", "text"] },
+  ];
+  for (const extraction of invalid) {
+    const result = runCode(
+      "Validate AI Extraction",
+      { choices: [{ message: { content: JSON.stringify(extraction) } }] },
       { "Normalize Contact Data": { lead } },
       { NVIDIA_NIM_MODEL: "example/model" },
     )[0].json.crmPayload;

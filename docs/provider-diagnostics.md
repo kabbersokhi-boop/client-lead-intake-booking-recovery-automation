@@ -96,3 +96,27 @@ The replacement key remains only in protected local runtime storage. Keep it
 out of chat, Git, screenshots, browser responses, n8n workflow exports, and
 command output. Rotation/revocation remains the required remediation for the
 previously exposed key.
+
+## Structured-output reliability diagnosis
+
+A recent baseline request to NVIDIA's OpenAI-compatible chat-completions
+endpoint returned HTTP `200`, but `finish_reason=length` and
+`message.content` was unusable/empty. The endpoint accepted
+`response_format: { "type": "json_object" }` by itself, but that request also
+truncated. With both `reasoning_effort: "low"` and JSON mode, the request
+returned HTTP `200` in about `10.3` seconds and its output passed the exact
+five-field application schema.
+
+HTTP success alone is therefore not treated as successful enrichment. The
+intake's strict application validator remains required; malformed JSON, extra
+or missing keys, unsupported enums, and invalid field types continue to use
+the existing `fallback_invalid` path. Provider errors and timeouts continue to
+use `fallback_unavailable`. The deployed NVIDIA timeout remains `18,000` ms,
+and intake persistence remains independent of optional AI enrichment.
+
+The single fresh synthetic webhook verification after this correction was
+n8n execution `3642`. NVIDIA returned status `200`, the application marked it
+`enriched`, and the development CRM persisted the exact five fields:
+`furnace_service`, `Surrey`, `Tuesday afternoon`, `medium`, and summary
+`Furnace not heating`. The intake returned HTTP `201`; its phone-only payload
+created no follow-up email work.

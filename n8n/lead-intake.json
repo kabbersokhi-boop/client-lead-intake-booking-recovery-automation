@@ -93,7 +93,7 @@
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-          "jsonBody": "={{ { model: $env.NVIDIA_NIM_MODEL, temperature: 0, max_tokens: 180, messages: [{ role: 'system', content: 'Extract only service_type, location, preferred_time, urgency, and summary. Do not infer contact details, pricing, availability, appointment confirmation, or CRM status. Use service types: furnace_service, air_conditioning_service, plumbing_service, electrical_service, general_home_service, unknown. Use urgency: low, medium, high, urgent. Return JSON only.' }, { role: 'user', content: $('Normalize Contact Data').first().json.lead.normalized_message }] } }}",
+          "jsonBody": "={{ { model: $env.NVIDIA_NIM_MODEL, temperature: 0, max_tokens: 180, reasoning_effort: 'low', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: 'Extract only service_type, location, preferred_time, urgency, and summary. Do not infer contact details, pricing, availability, appointment confirmation, or CRM status. Use service types: furnace_service, air_conditioning_service, plumbing_service, electrical_service, general_home_service, unknown. Use urgency: low, medium, high, urgent. Return JSON only.' }, { role: 'user', content: $('Normalize Contact Data').first().json.lead.normalized_message }] } }}",
           "options": {
             "timeout": "={{ Number($env.NVIDIA_NIM_TIMEOUT_MS || 18000) }}"
           }

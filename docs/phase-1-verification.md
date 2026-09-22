@@ -45,6 +45,28 @@ for workflow and network overhead; a timeout still enters the safe fallback
 path. The bounded output limit prevents the extraction response from growing
 without limit.
 
+## NVIDIA structured-output reliability correction
+
+HTTP `200` did not guarantee usable model output. A recent baseline request
+using `openai/gpt-oss-20b`, `temperature=0`, and `max_tokens=180` ended with
+`finish_reason=length` and unusable/empty `message.content`. Adding JSON mode
+alone (`response_format: { type: "json_object" }`) was accepted by the
+endpoint but still truncated. During diagnosis, combining JSON mode with
+`reasoning_effort: "low"` returned HTTP `200` in about `10.3` seconds and
+produced output that passed the exact five-field application schema.
+
+The tracked intake request now includes those two NVIDIA request fields. The
+model, temperature, output limit, and NVIDIA timeout remain unchanged; the
+timeout is still `18,000` ms. The strict application validator remains
+mandatory: malformed JSON, missing or extra keys, unsupported enum values, and
+invalid field types enter the existing safe fallback. AI enrichment remains
+optional, and lead persistence continues through `fallback_invalid` or
+`fallback_unavailable` if NVIDIA output is unusable or the provider fails.
+
+| Check | Status | Evidence |
+| --- | --- | --- |
+| Fresh synthetic n8n intake after structured-output correction | Passed | Execution `3642` returned HTTP `201`; correlation `d31a50f6-04bb-4e1e-b961-a578bcb88c82`; `ai_status=enriched`; persisted `furnace_service`, `Surrey`, `Tuesday afternoon`, `medium`, and `Furnace not heating`; one `crm.lead_created` audit event. The active runtime CRM provider was `development`; the phone-only lead scheduled no email follow-up. |
+
 ## Remaining manual check
 
 | Check | Status | Required next action |
