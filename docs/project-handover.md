@@ -6,7 +6,12 @@ Future phases must update this document before their final commit so the reposit
 
 ## Current checkpoint
 
-- Review date: 2026-09-22.
+- Review date: 2026-09-23.
+- The local interview/demo runtime is persistently configured for `highlevel_live` in ignored,
+  mode-600 `.env`. The 2026-09-23 website-originated synthetic Contact/Opportunity, exact replay,
+  post-recreate runtime check, and adapter-key rotation are documented in
+  `docs/phase-6-live-highlevel-verification.md`. The committed `.env.example` remains on the
+  safe `development` default.
 - Phase 6 fallback starts from approved Phase 7A checkpoint `bfc4d88dbfb291b2dbcb52eb77e2ab6c2a13dd1b`.
 - Approved Phase 6 correction checkpoint: `ffa877ffd88adaba53695a03e0a3ac68cb4010fd`
   (`Harden Phase 6 identity and simulator boundaries`). Exact-SHA Backend CI run `35645604249`

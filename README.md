@@ -2,7 +2,7 @@
 
 A fresh technical-interview capability demonstration for an end-to-end enquiry and booking lifecycle. All example data is synthetic. This is not a production client deployment and does not use a fictional product or client brand.
 
-> Current scope: Phases 1–6 and Phase 7A are complete for the documented reference-demo boundary. The HighLevel Contact/Opportunity projection has been verified against a real HighLevel sub-account using synthetic data, including one website/n8n/FastAPI/PostgreSQL/live-HighLevel intake and an exact replay with no additional logical CRM effect. `DevelopmentCRMProvider` remains the safe default runtime mode; PostgreSQL remains application and reliability truth.
+> Current scope: Phases 1–6 and Phase 7A are complete for the documented reference-demo boundary. The HighLevel Contact/Opportunity projection has been verified against a real HighLevel sub-account using synthetic data, including a website/n8n/FastAPI/PostgreSQL/live-HighLevel intake and exact replay. The committed `.env.example` keeps the safe `development` default; this local interview/demo runtime uses ignored, protected `.env` with `CRM_PROVIDER_MODE=highlevel_live`. PostgreSQL remains application and reliability truth.
 
 ## Architecture
 
@@ -30,6 +30,7 @@ HighLevel Contract Simulator
 - n8n validates customer input before calling NVIDIA NIM, preserves the source message separately from normalized processing text, validates model output, and explicitly returns 422, 201/200, or a safe 502 response.
 - NVIDIA NIM is used only to extract service context from the original message; it cannot establish availability, bookings, prices, CRM state, or contact details.
 - `development` remains the safe default runtime mode. In `highlevel_live` mode, the HighLevel-specific adapter projects the durable intake to the verified real sub-account Contact and Opportunity in `HVAC Service Pipeline / New Lead`; PostgreSQL remains reliability/audit truth.
+- This workstation’s ignored `.env` persistently selects `highlevel_live`, so normal website intake projects to the real HighLevel sub-account after durable PostgreSQL intake. A normal Compose build, restart, or backend recreation reads the same protected configuration. The simulator remains the deterministic fault laboratory.
 - The loopback-only simulator at `http://localhost:18080` remains separate deterministic test infrastructure. It implements the documented contact/opportunity subset, validates auth/version/request shapes, shows sanitized API events, and provides one-shot 401/429/500/timeout and uncertain-write testing. It is not a HighLevel sandbox or a substitute for the separate live-vendor evidence.
 - PostgreSQL stores leads, follow-ups, appointments, source and persistence timestamps, and safe audit metadata keyed by correlation ID. Email-capable leads receive one configurable pending follow-up; phone-only leads do not schedule unsupported email work.
 - Every validated lead write is persisted before delivery. The first stored prepared payload remains canonical for creation even if a repeated intake has a different valid AI outcome; persisted CRM state remains canonical for replay. Confirmed writes remain `201`/`200`; unfinished durable work returns `202 queued` without a fabricated CRM ID or booking access.
@@ -40,7 +41,7 @@ HighLevel Contract Simulator
 
 ## Run locally
 
-1. Copy `.env.example` to `.env`, using local-only database values. Generate long, separate random values for `CRM_ADAPTER_API_KEY` and `HIGHLEVEL_SIMULATOR_TOKEN`; do not add them, NVIDIA keys, or n8n secrets to Git. Keep `CRM_PROVIDER_MODE=development` for the original path or use `highlevel_simulator` for the local contract demonstration.
+1. For a new checkout, copy `.env.example` to `.env` and use local-only database values. Generate long, separate random values for `CRM_ADAPTER_API_KEY` and `HIGHLEVEL_SIMULATOR_TOKEN`; do not add them, NVIDIA keys, or n8n secrets to Git. The example keeps `CRM_PROVIDER_MODE=development` as its safe default. This interview/demo checkout’s ignored `.env` is already protected and configured for `highlevel_live`; do not replace it with the example file.
 2. Start PostgreSQL, the FastAPI service, and Mailpit:
 
    ```bash

@@ -65,3 +65,37 @@ job remained completed with `attempt_count: 1`. A post-replay HighLevel audit st
 complete effects, zero missing Opportunities, and zero duplicate identity conflicts. This is
 evidence of at-least-once delivery/retry with idempotent business effects and explicit
 reconciliation, not a claim of universal exactly-once delivery.
+
+## Persistent local interview/demo runtime — 2026-09-23
+
+The repository remains safe by default: `.env.example` selects `development` and contains no
+usable credentials or vendor IDs. This workstation’s ignored mode-600 `.env` now persists
+`CRM_PROVIDER_MODE=highlevel_live`, the official API base, the existing protected PIT, and the
+verified live resource mappings. The finite HighLevel timeout remains 2 seconds; no timeout change
+was needed for the successful live intake. The ignored `.n8n-runtime.env` and n8n container use
+the same newly rotated adapter key as the backend. The previous key returned HTTP 401; the new key
+authenticated from n8n to FastAPI with HTTP 200.
+
+Read-only API checks matched the configured location, `HVAC Service Pipeline`, all three stages
+in order, and all three contact/opportunity custom fields before the new intake. A normal
+`docker compose up --build -d` started the backend in `highlevel_live`; after the website test,
+`docker compose up --build -d --force-recreate backend` again returned healthy in live mode with
+the token present and all eight non-secret mappings intact. n8n remained able to authenticate to
+FastAPI after the recreate.
+
+Chrome submitted one new synthetic identity through the actual website form to the active n8n
+webhook. n8n execution `3986` completed the create path (HTTP 201); PostgreSQL contains one Lead,
+one completed CRMWriteJob, one completed attempt referencing execution `3986`, and no incident.
+A read-only post-replay HighLevel audit found exactly one Contact and one linked Opportunity for
+the submission, with the expected contact submission/correlation fields and opportunity submission
+field, in `HVAC Service Pipeline / New Lead`.
+
+The same browser form then replayed the same submission and correlation IDs with unchanged customer
+fields once. n8n execution `3998` returned
+HTTP 200 and the browser showed its safe replay acknowledgement. The local job remained completed
+with one attempt and no incident; the HighLevel audit still found exactly one Contact and one
+Opportunity. An intervening blank-form retry (execution `3987`) received HTTP 422 and created no
+durable lead or incident; it is retained as validation evidence. No fault was injected against
+HighLevel. The simulator remains the controlled 401/429/500/timeout and uncertain-acknowledgement
+test harness. PostgreSQL remains application/reliability truth, and subsequent local lifecycle
+stage synchronization remains unimplemented.
