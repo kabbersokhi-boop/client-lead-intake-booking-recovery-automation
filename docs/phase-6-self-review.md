@@ -190,3 +190,8 @@ record now confirms seven synthetic Contact/Opportunity pairs, including one web
 PostgreSQL/live-HighLevel journey and an exact no-new-effect replay. Simulator-only controlled
 fault behavior remains the evidence for 401, 429, 500, and timeout handling; no live account
 fault was manufactured.
+
+This focused local invocation is not the full exact-SHA CI total. Backend CI run `35759169287` for
+the live-verification commit passed 165 Python tests, 32 browser/helper tests, and 43 workflow
+tests: 240 passing checks. The local counts of three browser test files and four workflow test
+files are file counts, not test counts.

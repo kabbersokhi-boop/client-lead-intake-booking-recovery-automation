@@ -17,9 +17,10 @@ Future phases must update this document before their final commit so the reposit
   for the documented contact/opportunity subset, plus a separately credentialed PIT-compatible
   `highlevel_live` projection pinned to the official API host. The simulator remains local test
   infrastructure, not a HighLevel sandbox.
-- Current deterministic verification: 153 Python tests, 32 frontend/helper tests, and 43
-  workflow tests (228 total), plus Ruff, simulator JavaScript/JSON/shell syntax, Compose
-  validation, `git diff --check`, and tracked-content secret scanning.
+- Exact-SHA Backend CI run `35759169287` for `911e6ba9f699ac400e48d158d0b9faac4427b6a8` passed
+  165 Python tests, 32 browser/helper tests, and 43 workflow tests (240 passing checks total).
+  This is distinct from the focused local Phase 6 invocation: 154 Python passed with 11 skipped,
+  plus 3 browser test files and 4 workflow test files. Do not turn file counts into test counts.
 - Phase 7A presentation-hardening implementation SHA: `235d1f55156820a1aa0a0b7416bf6a44a3533e4f`.
 - Phase 7A deterministic verification: 98 Python tests, 28 frontend/helper tests, and 43
   workflow tests (169 total), plus Ruff, JavaScript/JSON/shell syntax, Compose validation,
@@ -154,8 +155,9 @@ verified CRM completion. It does not provide an arbitrary dismiss action. Theref
 - **NVIDIA NIM:** optional structured enrichment with safe fallback; it is not allowed to decide whether a valid lead is preserved.
 - **Mailpit:** local development SMTP capture, not a production email provider.
 - **Development CRM adapter:** explicit local stand-in, never GoHighLevel.
-- **HighLevel adapter:** optional HTTP projection that composes the development persistence path
-  in `highlevel_simulator` mode; it normalizes vendor-contract behavior but does not own retries.
+- **HighLevel adapter:** optional HTTP projection that composes the development persistence path;
+  it supports the retained `highlevel_simulator` fault harness and the separately verified
+  PIT-authenticated `highlevel_live` Contact/Opportunity projection, but does not own retries.
 - **HighLevel Contract Simulator:** separate isolated test service at `http://localhost:18080`;
   it implements only the used contact/opportunity subset and is not HighLevel or a vendor sandbox.
 - **Make:** downstream management routing only. The private Custom Webhook, Data Store branch,
@@ -254,11 +256,11 @@ rejected, and proxy environment settings are ignored. Live mode has separate cre
 cannot be pointed at an arbitrary host.
 
 Current official docs expose appointment create/read under `Version: v3`, correcting the earlier
-old-version rationale. Appointment and automatic stage sync remain omitted because the project
-has no verified live calendar/account IDs and correct post-booking projection needs durable
-lifecycle-sync ownership; Phase 2 booking was not weakened by an external call. Exact contact
-lookup remains officially OAuth-only, so a Private Integration Token alone is not a verified live
-reconciliation design.
+old-version rationale. Appointment and automatic stage sync remain omitted because no live
+calendar mapping or durable post-booking lifecycle-sync ownership has been verified; Phase 2
+booking was not weakened by an external call. Exact contact lookup remains officially OAuth-only,
+so the verified Private Integration Token reconciliation path uses bounded location contact
+listing, strict local identifier comparison, and stable identity custom fields instead.
 
 The local Lead/follow-up/audit commit precedes external projection. Phase 3 recovery owns retries,
 leases, attempt limits, and reconciliation if contact/opportunity projection fails or an
@@ -294,9 +296,11 @@ Live-local evidence on 2026-09-21 through 2026-09-22:
   opportunities, zero appointments, and 14 sanitized events. Retained n8n execution `2096` was not
   rerun.
 
-See `docs/phase-6-verification.md` and `docs/phase-6-self-review.md` for the official documentation
-source record, contract details, tests, security review, and limitations. Never present the
-simulator as a HighLevel sandbox or the adapter as live-verified.
+The preceding simulator facts are historical/local-test evidence. See
+`docs/phase-6-verification.md` and `docs/phase-6-self-review.md` for their contract, fault, and
+recovery role. Never present the simulator as a HighLevel sandbox or as live-vendor evidence.
+The separate `docs/phase-6-live-highlevel-verification.md` record now supports the verified live
+Contact/Opportunity claim.
 
 ## Phase 7 — presentation hardening and remaining work
 
@@ -310,10 +314,11 @@ unchanged. The self-contained browser-first walkthrough is
 `docs/interview-demo-runbook.md`; it includes the `272`/`276`/`283` distinction and the Phase 5
 Make `1614`/`1627`/`1654` debugging story.
 
-HighLevel live integration remains unverified. `DevelopmentCRMProvider` remains the distinct local
-Lead/follow-up/audit persistence implementation; the Phase 6 adapter is a separate contact and
-opportunity HTTP projection to explicitly local test infrastructure. Automatic lifecycle-stage
-and appointment synchronization are not wired.
+HighLevel live Contact/Opportunity projection is verified with synthetic data through one
+website/n8n/FastAPI/PostgreSQL/live-HighLevel intake and an exact replay with no additional logical
+CRM effect. `DevelopmentCRMProvider` remains the distinct safe-default local Lead/follow-up/audit
+persistence implementation. The retained simulator remains the deterministic local fault harness;
+automatic HighLevel lifecycle-stage and appointment/calendar synchronization are not wired.
 
 The remaining Phase 7B work is screenshot selection/redaction, Google Sheets dashboard polish,
 final README case-study polish, browser rehearsal, and rebuilding the final interview PDF. Do not

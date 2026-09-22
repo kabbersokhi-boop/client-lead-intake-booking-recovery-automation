@@ -62,8 +62,11 @@ The disabled-by-default fixed-window simulator affects only registered synthetic
 
 The safe default remains `DevelopmentCRMProvider` plus the existing lifecycle and CRM-write
 recovery services. Optional `highlevel_simulator` mode preserves that local persistence and adds a
-separate HighLevel-specific HTTP projection to the local contract simulator. `highlevel_live`
-fails closed. No live vendor CRM, real calendar, or external email provider is configured.
+separate HighLevel-specific HTTP projection to the local contract simulator. `highlevel_live` is a
+separately credentialed, official-host-pinned Contact/Opportunity projection whose synthetic
+real-sub-account verification is recorded in `docs/phase-6-live-highlevel-verification.md`. No
+live calendar, appointment sync, external email provider, or automatic HighLevel lifecycle-stage
+synchronization is configured.
 
 Simulator mode accepts only exact local HTTP hosts with an explicit port and does not use
 environment proxy settings. It cannot be configured with an arbitrary external/vendor URL.

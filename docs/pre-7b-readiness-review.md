@@ -143,10 +143,15 @@ The final release commit still requires exact-SHA GitHub Actions success after p
 - All inspected data was synthetic. Temporary browser screenshots remained under `/tmp` and were
   not committed.
 
-## Known limitations deliberately retained
+## Historical pre-live-verification limitations deliberately retained
 
-- Live HighLevel authentication, account IDs, pipeline/calendar IDs, live responses, vendor rate
-  limits, and production-scale opportunity reconciliation are not verified.
+This pre-7B review predates the separately recorded Phase 6 live Contact/Opportunity verification.
+Its simulator-era statements remain historical evidence; current live-vendor evidence is in
+`docs/phase-6-live-highlevel-verification.md`.
+
+- Production-scale opportunity reconciliation and live vendor rate-limit behavior are not
+  verified. The later Phase 6 live record verifies PIT authentication, configured account/pipeline
+  mappings, and synthetic Contact/Opportunity effects, but not calendar IDs or synchronization.
 - Automatic HighLevel lifecycle-stage synchronization, appointment synchronization, and persistent
   external-ID mapping are not implemented.
 - Exact contact lookup retains the documented OAuth limitation.

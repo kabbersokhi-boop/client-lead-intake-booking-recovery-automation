@@ -24,15 +24,22 @@ projection: PostgreSQL and the existing recovery system retain application/relia
 Browser -> n8n -> FastAPI durable intake/recovery boundary -> PostgreSQL local truth
                          |
                          +-> HighLevelCRMProvider -> HighLevelClient -> real HTTP
-                                                        |
+                                                        |              |
+                                                        |              +-> REAL HighLevel sub-account
+                                                        |                  Contact + Opportunity
+                                                        |                  HVAC Service Pipeline / New Lead
                                                         v
-                                           HighLevel Contract Simulator
+                                           Local HighLevel Contract Simulator
+                                           (deterministic 401/429/500/timeout faults)
 ```
 
-`DevelopmentCRMProvider` remains the original local CRM persistence implementation. In
-`highlevel_simulator` mode, `HighLevelCRMProvider` composes that local persistence service with a
-separate documented HTTP projection. This preserves the existing Lead, follow-up, lifecycle,
-audit, and recovery records while making the external simulator a real network boundary.
+`DevelopmentCRMProvider` remains the original safe-default local CRM persistence implementation.
+In `highlevel_simulator` mode, `HighLevelCRMProvider` composes that local persistence service with
+a separate documented HTTP projection to deterministic local test infrastructure. In
+`highlevel_live` mode, the same vendor translation boundary projects the durable intake to the
+separately verified real Contact/Opportunity integration. This preserves the existing Lead,
+follow-up, lifecycle, audit, and recovery records while keeping PostgreSQL as application and
+reliability truth.
 
 The provider returns the existing n8n-facing acknowledgement shape. Recovery completion still
 links to the local `Lead` UUID because that row is the authoritative application result; local
@@ -292,7 +299,12 @@ booking, diagnostic fault injection, real HighLevel, Make, or NVIDIA call was tr
 - existing PostgreSQL recovery ownership and `Retry-After` behavior;
 - unchanged default `DevelopmentCRMProvider` path.
 
-## Not verified
+## Historical simulator-era limits (before live verification)
+
+The following limits accurately describe the retained local-simulator evidence above. They are not
+the current Phase 6 vendor-verification status; see
+`docs/phase-6-live-highlevel-verification.md` for the separately verified real Contact/Opportunity
+projection and exact replay.
 
 - live HighLevel authentication or token scopes;
 - real account/location, pipeline, stage, custom-field, user, service, or calendar IDs;
@@ -302,7 +314,10 @@ booking, diagnostic fault injection, real HighLevel, Make, or NVIDIA call was tr
 - live HighLevel contact, opportunity, or appointment side effects;
 - automatic external lifecycle or appointment synchronization.
 
-## Interview wording
+## Historical simulator-era interview wording
+
+The following wording was accurate for the retained pre-vendor-access simulator demonstration. Do
+not use it as the current project-status statement.
 
 “I couldn't obtain live HighLevel API credentials in time, so I did not mock a live integration
 and claim it was finished. I implemented the HighLevel-specific adapter against the current
@@ -318,3 +333,14 @@ It is not HighLevel. The HighLevel adapter is a separate external integration pa
 requires supported OAuth or another reviewed reconciliation path, real location/pipeline/custom-
 field IDs, live response verification, and separate durable ownership for any future lifecycle or
 calendar synchronization.”
+
+## Current Phase 6 wording
+
+The HighLevel Contact/Opportunity integration was verified against a real HighLevel sub-account
+using synthetic data, including one website/n8n/FastAPI/PostgreSQL/live-HighLevel intake and an
+exact replay that produced no additional logical CRM effect. PostgreSQL remains application and
+reliability truth. The local Contract Simulator remains the deterministic fault/recovery harness;
+its evidence is not live-vendor evidence. At-least-once delivery/retry with idempotent business
+effects and explicit reconciliation is the supported reliability claim. Automatic HighLevel
+`Contacted` / `Appointment Booked` stage synchronization and appointment/calendar synchronization
+are not implemented.

@@ -2,38 +2,39 @@
 
 A fresh technical-interview capability demonstration for an end-to-end enquiry and booking lifecycle. All example data is synthetic. This is not a production client deployment and does not use a fictional product or client brand.
 
-> Current scope: Phases 1–6 and Phase 7A are complete for the documented local reference-demo boundary. The pre-7B system polish is complete. The HighLevel-specific adapter is contract-tested over real HTTP against a separate local simulator for contact and opportunity behavior; this is not a live HighLevel integration or vendor sandbox. `DevelopmentCRMProvider` remains the safe default and live HighLevel verification is still pending.
+> Current scope: Phases 1–6 and Phase 7A are complete for the documented reference-demo boundary. The HighLevel Contact/Opportunity projection has been verified against a real HighLevel sub-account using synthetic data, including one website/n8n/FastAPI/PostgreSQL/live-HighLevel intake and an exact replay with no additional logical CRM effect. `DevelopmentCRMProvider` remains the safe default runtime mode; PostgreSQL remains application and reliability truth.
 
 ## Architecture
 
 ```text
-Browser HVAC Service Request
+Website HVAC Service Request
         ↓
   n8n Intake Workflow
         ↓
-Validation / Normalization
+Validation / Normalization / optional NVIDIA NIM enrichment
         ↓
-Optional NVIDIA NIM Enrichment
-        └── safe fallback if unavailable/invalid
-        ↓
-FastAPI CRM Integration Boundary
-        ├── PostgreSQL Durable CRM Job + Lead + Pending Follow-up
-        │          ↓
-        │    n8n Follow-up or Booking Workflow
-        │          └── Development Email → Mailpit
-        └── Optional HighLevel HTTP adapter → Local Contract Simulator
-                    (intake/recovery projection only)
+FastAPI durable intake/recovery boundary
+        ├── PostgreSQL application/reliability truth
+        │     (Lead, CRM write job, attempt, follow-up, audit state)
+        ├── HighLevel adapter → REAL HighLevel sub-account
+        │                         → Contact + Opportunity
+        │                         → HVAC Service Pipeline / New Lead
+        └── Local lifecycle/email demo paths → Mailpit
+
+HighLevel Contract Simulator
+        → deterministic local fault/recovery infrastructure
+        → 401 / 429 / 500 / timeout / uncertain-write testing
 ```
 
 - The browser creates a `submission_id`, `correlation_id`, and `received_at` for a pending enquiry. An unchanged retry reuses those values; editing the enquiry deliberately creates a new identity.
 - n8n validates customer input before calling NVIDIA NIM, preserves the source message separately from normalized processing text, validates model output, and explicitly returns 422, 201/200, or a safe 502 response.
 - NVIDIA NIM is used only to extract service context from the original message; it cannot establish availability, bookings, prices, CRM state, or contact details.
-- The FastAPI **development CRM adapter** remains the local persistence boundary, not HighLevel. Optional `highlevel_simulator` mode composes it with a separate HighLevel-specific HTTP adapter; PostgreSQL remains reliability/audit truth.
-- The loopback-only simulator at `http://localhost:18080` implements only the documented contact/opportunity subset used here, validates auth/version/request shapes, shows sanitized API events, and provides one-shot 401/429/500/timeout faults. Simulator mode rejects non-local, HTTPS, credential-bearing, or path-bearing targets and ignores proxy environment variables; it is not a HighLevel sandbox.
+- `development` remains the safe default runtime mode. In `highlevel_live` mode, the HighLevel-specific adapter projects the durable intake to the verified real sub-account Contact and Opportunity in `HVAC Service Pipeline / New Lead`; PostgreSQL remains reliability/audit truth.
+- The loopback-only simulator at `http://localhost:18080` remains separate deterministic test infrastructure. It implements the documented contact/opportunity subset, validates auth/version/request shapes, shows sanitized API events, and provides one-shot 401/429/500/timeout and uncertain-write testing. It is not a HighLevel sandbox or a substitute for the separate live-vendor evidence.
 - PostgreSQL stores leads, follow-ups, appointments, source and persistence timestamps, and safe audit metadata keyed by correlation ID. Email-capable leads receive one configurable pending follow-up; phone-only leads do not schedule unsupported email work.
 - Every validated lead write is persisted before delivery. The first stored prepared payload remains canonical for creation even if a repeated intake has a different valid AI outcome; persisted CRM state remains canonical for replay. Confirmed writes remain `201`/`200`; unfinished durable work returns `202 queued` without a fabricated CRM ID or booking access.
 - Recovery claims one due job with a lease, reconciles by stable submission identity, obtains shared quota permission, and then completes, retries, blocks, or holds the job for review. Four total automatic writes are allowed by default; manual requeue authorizes one additional operator attempt without deleting history.
-- The booking operation atomically creates one active appointment per lead, moves the local pipeline state to `appointment_booked`, and cancels a still-pending follow-up. It does not update the simulator opportunity. A repeated `booking_request_id` returns the same appointment; a different booking for that lead returns a controlled conflict.
+- The booking operation atomically creates one active local appointment per lead, moves the local pipeline state to `appointment_booked`, and cancels a still-pending follow-up. Automatic HighLevel `Contacted` / `Appointment Booked` stage synchronization and live appointment/calendar synchronization are not implemented. A repeated `booking_request_id` returns the same appointment; a different booking for that lead returns a controlled conflict.
 - Mailpit is a local development SMTP sink, not a real customer email provider. The actual path is n8n HTTP orchestration → FastAPI development email gateway → SMTP → Mailpit; the public workflows do not use a native n8n SMTP node. Follow-up and booking messages are multipart text/HTML, escape stored values, show only persisted optional details, and carry an explicit development notice.
 - The separate manual Phase 5 workflow reads an authenticated aggregate-only FastAPI projection and sends it to Make from protected n8n runtime configuration. Live executions verified first-row creation and a corrected same-key update without duplication; an isolated failed reporting execution left customer-critical durable counts unchanged. The workflow remains inactive/manual.
 
@@ -106,7 +107,7 @@ ruff check app tests
 
 Tests use SQLite for fast API/schema tests and disposable PostgreSQL for migration, persistence, and concurrent replay coverage. Node tests execute the exported n8n code-node logic with deterministic fixtures and browser retry helpers. They never call NVIDIA NIM or n8n. Public GitHub Actions provisions PostgreSQL and runs all deterministic tests without secrets.
 
-The established deterministic verifier currently runs 153 Python tests (SQLite and disposable PostgreSQL coverage), 32 frontend/helper tests, and 43 workflow-code/structure tests: 228 total. Live n8n, NVIDIA, Mailpit, Make, and local simulator checks remain separately identified evidence rather than silently mocked. The frontend/helper count is not a claim that every check drives a real browser, and the Python count is not a claim that every test is PostgreSQL-specific.
+Exact-SHA [Backend CI run 35759169287](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/actions/runs/35759169287) passed 165 Python tests, 32 browser/helper tests, and 43 workflow tests: 240 passing checks total. This differs from the focused local Phase 6 verification invocation, which recorded 154 Python passes with 11 skips and ran 3 browser test files plus 4 workflow test files; file counts are not test counts. Live n8n, NVIDIA, Mailpit, Make, and simulator checks remain separately identified evidence rather than silently mocked.
 
 ## Live verification
 
@@ -118,7 +119,7 @@ Open [http://localhost:18000/operations.html](http://localhost:18000/operations.
 
 Phase 5 reporting semantics, live Make/Google Sheets evidence, failure isolation, and limitations are recorded in [docs/phase-5-verification.md](docs/phase-5-verification.md) and [docs/phase-5-self-review.md](docs/phase-5-self-review.md). Do not configure the private Make webhook in source-controlled files.
 
-Phase 6 adapter/simulator semantics, current official source record, local evidence, and live-vendor limitations are recorded in [docs/phase-6-verification.md](docs/phase-6-verification.md) and [docs/phase-6-self-review.md](docs/phase-6-self-review.md). Appointment synchronization is deliberately omitted rather than inserted unsafely into the approved booking transaction.
+Phase 6 simulator semantics and local fault evidence are recorded in [docs/phase-6-verification.md](docs/phase-6-verification.md) and [docs/phase-6-self-review.md](docs/phase-6-self-review.md). The authoritative real-vendor record is [docs/phase-6-live-highlevel-verification.md](docs/phase-6-live-highlevel-verification.md). Appointment/calendar and automatic lifecycle-stage synchronization remain deliberately omitted rather than inserted unsafely into the approved booking transaction.
 
 For an interview-ready, browser-first local walkthrough, see [docs/interview-demo-runbook.md](docs/interview-demo-runbook.md). It preserves the retained failure and reporting stories without asking the presenter to recreate faults.
 
