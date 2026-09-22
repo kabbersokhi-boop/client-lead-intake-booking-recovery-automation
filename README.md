@@ -16,8 +16,9 @@ A customer submits an HVAC service request. n8n validates and normalizes it, opt
 flowchart TB
     C[Customer] --> W[Website request form]
     W --> I[n8n · Lead Intake]
-    I --> V[Validate and normalize]
-    V --> N[Optional NVIDIA NIM extraction]
+    I --> V{Request valid?}
+    V -- "no" --> X[Return validation error]
+    V -- "yes" --> N[Optional NVIDIA NIM extraction<br/>validated result or safe fallback]
     N --> A[FastAPI application boundary]
     A --> P[(PostgreSQL · durable application and recovery state)]
     P --> H[HighLevel adapter]
@@ -25,8 +26,7 @@ flowchart TB
 
     W --> B[n8n · Appointment Booking]
     B --> A
-    I --> F[n8n · Follow-up Dispatch]
-    F --> A
+    F[Scheduled n8n · Follow-up Dispatch] -- "poll due items and dispatch" --> A
     A --> M[SMTP development email]
     M --> MP[Mailpit · local test inbox]
 
