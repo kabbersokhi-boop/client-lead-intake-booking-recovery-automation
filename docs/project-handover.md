@@ -14,7 +14,9 @@ Future phases must update this document before their final commit so the reposit
 - The pre-7B system-wide readiness pass starts from that clean checkpoint. Its exact final SHA and
   exact-SHA CI belong in the completion report rather than a self-referential documentation commit.
 - Phase 6 implements a separate HighLevel HTTP adapter and loopback-only local contract simulator
-  for the documented contact/opportunity subset. It is not a live integration or vendor sandbox.
+  for the documented contact/opportunity subset, plus a separately credentialed PIT-compatible
+  `highlevel_live` projection pinned to the official API host. The simulator remains local test
+  infrastructure, not a HighLevel sandbox.
 - Current deterministic verification: 153 Python tests, 32 frontend/helper tests, and 43
   workflow tests (228 total), plus Ruff, simulator JavaScript/JSON/shell syntax, Compose
   validation, `git diff --check`, and tracked-content secret scanning.
@@ -39,8 +41,10 @@ Future phases must update this document before their final commit so the reposit
   and corrected same-key refresh without duplication. Isolated failure execution `1662` failed
   visibly without changing customer-critical durable counts. See
   `docs/phase-5-verification.md` for exact evidence and limitations.
-- Phase 6 local fallback is implemented and live-local verified. Live HighLevel authentication,
-  account mappings, responses, and effects remain unverified. The pre-7B polish clarifies the
+- Phase 6 local fallback and `highlevel_live` projection are implemented. The current live
+  HighLevel provisioning, synthetic Contact/Opportunity, exact replay, and website/n8n/FastAPI/
+  PostgreSQL verification evidence is recorded in `docs/phase-6-live-highlevel-verification.md`.
+  The pre-7B polish clarifies the
   business-first request/booking/trace journey, historical diagnostic incidents, workflow groups,
   truthful email wording, and simulator API-event sequence without changing durable semantics.
   Phase 7B screenshots, final case study, browser rehearsal, and final interview PDF remain
@@ -233,7 +237,8 @@ delivery. Do not purchase, upgrade, expose PostgreSQL/Operations, or create a tu
 the default. `HighLevelCRMProvider` composes that persistence with `HighLevelClient`, which sends
 real HTTP to a separately deployed local simulator in `highlevel_simulator` mode. PostgreSQL and
 the existing n8n recovery workflow retain jobs, leases, attempt limits, `Retry-After`, and
-reconciliation ownership. `highlevel_live` fails closed.
+reconciliation ownership. `highlevel_live` is an optional separately credentialed PIT projection,
+pinned to the official HTTPS host; see `docs/phase-6-live-highlevel-verification.md`.
 
 The implemented contract subset is contact upsert/read/exact lookup and opportunity
 search/create/update. Each supplied email/phone identifier is reconciled independently: every
@@ -245,7 +250,8 @@ unfinished jobs reconcile through stable custom fields.
 
 Simulator mode is structurally local: only explicit-port plain-HTTP URLs on
 `highlevel-simulator`, `localhost`, `127.0.0.1`, or `[::1]` are accepted, ambiguous URL forms are
-rejected, and proxy environment settings are ignored. `highlevel_live` still fails closed.
+rejected, and proxy environment settings are ignored. Live mode has separate credentials and
+cannot be pointed at an arbitrary host.
 
 Current official docs expose appointment create/read under `Version: v3`, correcting the earlier
 old-version rationale. Appointment and automatic stage sync remain omitted because the project

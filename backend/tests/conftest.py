@@ -7,7 +7,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 os.environ["CRM_PROVIDER_MODE"] = "development"
-os.environ.pop("HIGHLEVEL_TOKEN", None)
+os.environ.pop("HIGHLEVEL_SIMULATOR_TOKEN", None)
+os.environ.pop("HIGHLEVEL_LIVE_TOKEN", None)
 
 from app.config import settings
 from app.db.base import Base

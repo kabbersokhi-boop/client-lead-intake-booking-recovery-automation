@@ -2,7 +2,8 @@
 
 ## Review method
 
-The implementation is reviewed as a fallback integration, not as evidence of live vendor access.
+The implementation is reviewed as a fallback integration with a separately verified synthetic
+live vendor projection; it is not evidence of production traffic or customer messaging.
 The review covers the provider seam, canonical payload and recovery ownership, HTTP mappings,
 strict simulator behavior, UI wording, secret boundaries, replay, controlled failures, default
 development behavior, Compose exposure, historical runtime evidence, and complete regressions.
@@ -137,7 +138,8 @@ deterministic suite independent from protected runtime configuration.
 - All new test/demo identities are synthetic and simulator IDs use an explicit `sim_` prefix.
 - Fault controls change only isolated simulator memory and cannot claim, requeue, or edit PostgreSQL jobs.
 - Simulator reset cannot delete PostgreSQL, n8n, Mailpit, or historical execution evidence.
-- `highlevel_live` fails closed and cannot silently send to a vendor endpoint.
+- `highlevel_live` requires a distinct PIT, provisioned non-simulator IDs, and the exact official
+  HTTPS host; it cannot silently use simulator credentials or an arbitrary vendor endpoint.
 
 ## Adversarial verification checklist
 
@@ -181,10 +183,10 @@ source record and omission rationale are now current. Finally, the README diagra
 optional adapter under booking/follow-up, implying lifecycle synchronization that does not exist;
 the diagram and booking wording now identify it as intake/recovery projection only.
 
-The deterministic verifier passes 153 Python, 28 frontend/helper, and 43 workflow tests (224
-total), plus Ruff, simulator JavaScript syntax, JSON and shell checks, Compose validation, diff
-checking, and tracked-content secret scanning. Live-local inspection confirmed two stable contacts
-and two opportunities for two synthetic submissions, one completed replay with zero external
-requests, one simulator-only 429 with `Retry-After: 3`, zero external appointments, Normal final
-fault state, unchanged durable counts, and preserved historical execution evidence. Existing n8n
-recovery execution `2096` remains the earlier end-to-end recovery proof and was not rerun.
+The current focused regression run passes 154 Python tests with 11 skipped, all three browser test
+files, and all four workflow test files, plus changed-file Ruff, helper compilation, Compose
+validation, diff checking, and a working-tree credential-pattern scan. The live verification
+record now confirms seven synthetic Contact/Opportunity pairs, including one website/n8n/FastAPI/
+PostgreSQL/live-HighLevel journey and an exact no-new-effect replay. Simulator-only controlled
+fault behavior remains the evidence for 401, 429, 500, and timeout handling; no live account
+fault was manufactured.

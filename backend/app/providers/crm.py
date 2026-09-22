@@ -46,15 +46,10 @@ class DevelopmentCRMProvider(CRMProvider):
 def build_crm_provider(settings: Settings) -> CRMProvider:
     if settings.crm_provider_mode == "development":
         return DevelopmentCRMProvider()
-    if settings.crm_provider_mode == "highlevel_simulator":
+    if settings.crm_provider_mode in {"highlevel_simulator", "highlevel_live"}:
         from app.providers.highlevel import HighLevelCRMProvider
 
         return HighLevelCRMProvider(settings)
-    if settings.crm_provider_mode == "highlevel_live":
-        raise RuntimeError(
-            "highlevel_live is intentionally unavailable until live account access and "
-            "contract verification are completed."
-        )
     raise RuntimeError(
         "CRM_PROVIDER_MODE must be development, highlevel_simulator, or highlevel_live."
     )

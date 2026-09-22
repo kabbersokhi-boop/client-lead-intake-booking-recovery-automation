@@ -34,14 +34,28 @@ class HighLevelClient:
         *,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        if not settings.highlevel_token:
-            raise RuntimeError("HIGHLEVEL_TOKEN is required in highlevel_simulator mode.")
+        self.is_live = settings.crm_provider_mode == "highlevel_live"
+        token = (
+            settings.highlevel_live_token
+            if self.is_live
+            else settings.highlevel_simulator_token
+        )
+        if not token:
+            raise RuntimeError(
+                "HIGHLEVEL_LIVE_TOKEN is required in highlevel_live mode."
+                if self.is_live
+                else "HIGHLEVEL_SIMULATOR_TOKEN is required in highlevel_simulator mode."
+            )
         self.settings = settings
         self.client = httpx.Client(
-            base_url=settings.highlevel_base_url.rstrip("/"),
+            base_url=(
+                settings.highlevel_live_base_url
+                if self.is_live
+                else settings.highlevel_base_url.rstrip("/")
+            ),
             headers={
                 "Accept": "application/json",
-                "Authorization": f"Bearer {settings.highlevel_token.get_secret_value()}",
+                "Authorization": f"Bearer {token.get_secret_value()}",
                 "Version": "v3",
             },
             timeout=settings.highlevel_timeout_seconds,
@@ -121,7 +135,11 @@ class HighLevelClient:
             return None
         for field in fields:
             if isinstance(field, dict) and field.get("id") == field_id:
-                value = field.get("value", field.get("fieldValue"))
+                value = field.get("value")
+                if not isinstance(value, str):
+                    value = field.get("fieldValue")
+                if not isinstance(value, str):
+                    value = field.get("fieldValueString")
                 return value if isinstance(value, str) else None
         return None
 
@@ -151,6 +169,21 @@ class HighLevelClient:
         ]
 
     def _contact_payload(self, payload: CRMLeadCreate) -> dict[str, Any]:
+        if self.is_live:
+            name_parts = payload.full_name.strip().split(maxsplit=1)
+            body: dict[str, Any] = {
+                "firstName": name_parts[0],
+                "lastName": name_parts[1] if len(name_parts) > 1 else "",
+                "locationId": self.settings.highlevel_location_id,
+                "customFields": self._contact_fields(
+                    payload.submission_id, payload.correlation_id
+                ),
+            }
+            if payload.email:
+                body["email"] = str(payload.email)
+            if payload.phone:
+                body["phone"] = self._phone_for_contract(payload.phone)
+            return body
         body: dict[str, Any] = {
             "name": payload.full_name,
             "locationId": self.settings.highlevel_location_id,
@@ -194,6 +227,19 @@ class HighLevelClient:
     def _lookup_contacts_by_identifier(
         self, identifier: str, value: str
     ) -> list[dict[str, Any]]:
+        if self.is_live:
+            return [
+                contact
+                for contact in self._list_live_contacts()
+                if (
+                    isinstance(contact.get(identifier), str)
+                    and (
+                        contact[identifier].casefold() == value.casefold()
+                        if identifier == "email"
+                        else contact[identifier] == value
+                    )
+                )
+            ]
         contacts_by_id: dict[str, dict[str, Any]] = {}
         next_cursor = None
         seen_cursors: set[str] = set()
@@ -245,6 +291,70 @@ class HighLevelClient:
             "HighLevel contact reconciliation exceeded its bounded search window.",
         )
 
+    def _list_live_contacts(self) -> list[dict[str, Any]]:
+        """PIT-safe bounded contact listing; exact lookup is documented OAuth-only."""
+        contacts_by_id: dict[str, dict[str, Any]] = {}
+        start_after: int | None = None
+        start_after_id: str | None = None
+        for _ in range(50):
+            params: dict[str, Any] = {
+                "locationId": self.settings.highlevel_location_id,
+                "limit": 100,
+            }
+            if start_after is not None and start_after_id is not None:
+                params["startAfter"] = start_after
+                params["startAfterId"] = start_after_id
+            body = self._request(
+                "GET",
+                "/contacts/",
+                headers={"Version": "2021-07-28"},
+                params=params,
+            )
+            contacts = body.get("contacts")
+            meta = body.get("meta")
+            if not isinstance(contacts, list) or not isinstance(meta, dict):
+                raise HighLevelProviderError(
+                    502,
+                    "highlevel_malformed_response",
+                    "HighLevel returned a malformed contact list response.",
+                )
+            for contact in contacts:
+                if (
+                    not isinstance(contact, dict)
+                    or not isinstance(contact.get("id"), str)
+                    or contact.get("locationId") != self.settings.highlevel_location_id
+                ):
+                    raise HighLevelProviderError(
+                        502,
+                        "highlevel_malformed_response",
+                        "HighLevel returned a malformed contact list response.",
+                    )
+                contacts_by_id[contact["id"]] = contact
+            next_page = meta.get("nextPage")
+            if next_page is None or next_page == "":
+                return list(contacts_by_id.values())
+            candidate_after = meta.get("startAfter")
+            candidate_after_id = meta.get("startAfterId")
+            if (
+                not isinstance(next_page, str)
+                or not next_page
+                or not isinstance(candidate_after, int)
+                or not isinstance(candidate_after_id, str)
+                or not candidate_after_id
+                or (candidate_after == start_after and candidate_after_id == start_after_id)
+            ):
+                raise HighLevelProviderError(
+                    502,
+                    "highlevel_malformed_response",
+                    "HighLevel returned a malformed contact list cursor.",
+                )
+            start_after, start_after_id = candidate_after, candidate_after_id
+        raise HighLevelProviderError(
+            409,
+            "highlevel_identity_conflict",
+            "HighLevel contact reconciliation exceeded its bounded search window.",
+        )
+
     def _lookup_contact(self, payload: CRMLeadCreate) -> dict[str, Any] | None:
         identifiers: list[tuple[str, str]] = []
         if payload.email:
@@ -254,8 +364,24 @@ class HighLevelClient:
         expected_submission = str(payload.submission_id)
         expected_correlation = str(payload.correlation_id)
         resolved: dict[str, dict[str, Any]] = {}
+        live_contacts = self._list_live_contacts() if self.is_live else None
         for identifier, value in identifiers:
-            contacts = self._lookup_contacts_by_identifier(identifier, value)
+            contacts = (
+                [
+                    contact
+                    for contact in live_contacts
+                    if (
+                        isinstance(contact.get(identifier), str)
+                        and (
+                            contact[identifier].casefold() == value.casefold()
+                            if identifier == "email"
+                            else contact[identifier] == value
+                        )
+                    )
+                ]
+                if live_contacts is not None
+                else self._lookup_contacts_by_identifier(identifier, value)
+            )
             if len(contacts) > 1:
                 raise HighLevelProviderError(
                     409,
@@ -310,7 +436,15 @@ class HighLevelClient:
             if (
                 not isinstance(opportunities, list)
                 or not isinstance(body.get("meta"), dict)
-                or not isinstance(body.get("aggregations"), dict)
+                or (
+                    not self.is_live
+                    and not isinstance(body.get("aggregations"), dict)
+                )
+                or (
+                    self.is_live
+                    and "aggregations" in body
+                    and not isinstance(body.get("aggregations"), dict)
+                )
             ):
                 raise HighLevelProviderError(
                     502,
@@ -344,7 +478,11 @@ class HighLevelClient:
                     if (
                         field["id"]
                         == self.settings.highlevel_opportunity_submission_field_id
-                        and not isinstance(field.get("value", field.get("fieldValue")), str)
+                        and self._field_value(
+                            {"customFields": [field]},
+                            self.settings.highlevel_opportunity_submission_field_id,
+                        )
+                        is None
                     ):
                         raise HighLevelProviderError(
                             502,
@@ -405,7 +543,9 @@ class HighLevelClient:
             contact_id = contact["id"]
         else:
             contact_body = self._request(
-                "POST", "/contacts/upsert", json=self._contact_payload(payload)
+                "POST",
+                "/contacts/" if self.is_live else "/contacts/upsert",
+                json=self._contact_payload(payload),
             )
             contact = self._record(contact_body, "contact")
             contact_id = contact["id"]

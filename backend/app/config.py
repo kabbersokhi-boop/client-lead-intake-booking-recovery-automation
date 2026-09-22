@@ -4,6 +4,7 @@ from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SIMULATOR_HOSTS = {"highlevel-simulator", "localhost", "127.0.0.1", "::1"}
+HIGHLEVEL_LIVE_HOST = "services.leadconnectorhq.com"
 
 
 class Settings(BaseSettings):
@@ -15,7 +16,9 @@ class Settings(BaseSettings):
     crm_adapter_api_key: SecretStr | None = None
     crm_provider_mode: str = "development"
     highlevel_base_url: str = "http://highlevel-simulator:8080"
-    highlevel_token: SecretStr | None = None
+    highlevel_live_base_url: str = f"https://{HIGHLEVEL_LIVE_HOST}"
+    highlevel_simulator_token: SecretStr | None = None
+    highlevel_live_token: SecretStr | None = None
     highlevel_location_id: str = "sim_location_reference"
     highlevel_pipeline_id: str = "sim_pipeline_hvac"
     highlevel_stage_new_lead_id: str = "sim_stage_new_lead"
@@ -37,9 +40,38 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @model_validator(mode="after")
-    def validate_highlevel_simulator_target(self):
+    def validate_highlevel_target(self):
+        if self.crm_provider_mode == "highlevel_live":
+            if not self.highlevel_live_token:
+                raise ValueError("HIGHLEVEL_LIVE_TOKEN is required in highlevel_live mode.")
+            if self.highlevel_live_base_url != f"https://{HIGHLEVEL_LIVE_HOST}":
+                raise ValueError(
+                    "highlevel_live requires the official HTTPS HighLevel API host."
+                )
+            if not self.highlevel_location_id or self.highlevel_location_id.startswith("sim_"):
+                raise ValueError(
+                    "HIGHLEVEL_LOCATION_ID must be a real location ID in highlevel_live mode."
+                )
+            for field_name in (
+                "highlevel_pipeline_id",
+                "highlevel_stage_new_lead_id",
+                "highlevel_stage_contacted_id",
+                "highlevel_stage_appointment_booked_id",
+                "highlevel_contact_submission_field_id",
+                "highlevel_contact_correlation_field_id",
+                "highlevel_opportunity_submission_field_id",
+            ):
+                value = getattr(self, field_name)
+                if not value or value.startswith("sim_"):
+                    raise ValueError(
+                        f"{field_name.upper()} must be a real provisioned ID in "
+                        "highlevel_live mode."
+                    )
+            return self
         if self.crm_provider_mode != "highlevel_simulator":
             return self
+        if not self.highlevel_simulator_token:
+            raise ValueError("HIGHLEVEL_SIMULATOR_TOKEN is required in highlevel_simulator mode.")
         base_url = self.highlevel_base_url
         try:
             parsed = urlsplit(base_url)

@@ -54,15 +54,23 @@ def highlevel_settings(**changes) -> Settings:
     values = {
         "crm_provider_mode": "highlevel_simulator",
         "highlevel_base_url": "http://127.0.0.1:18080",
-        "highlevel_token": SecretStr("local-test-token"),
+        "highlevel_simulator_token": SecretStr("local-test-token"),
         "highlevel_timeout_seconds": 0.1,
+        "highlevel_location_id": "sim_location_reference",
+        "highlevel_pipeline_id": "sim_pipeline_hvac",
+        "highlevel_stage_new_lead_id": "sim_stage_new_lead",
+        "highlevel_stage_contacted_id": "sim_stage_contacted",
+        "highlevel_stage_appointment_booked_id": "sim_stage_appointment_booked",
+        "highlevel_contact_submission_field_id": "sim_cf_submission_id",
+        "highlevel_contact_correlation_field_id": "sim_cf_correlation_id",
+        "highlevel_opportunity_submission_field_id": "sim_of_submission_id",
     }
     values.update(changes)
     return Settings(_env_file=None, **values)
 
 
 class ContractBackend:
-    def __init__(self) -> None:
+    def __init__(self, *, live: bool = False) -> None:
         self.requests: list[httpx.Request] = []
         self.contacts: dict[str, dict] = {}
         self.opportunities: dict[str, dict] = {}
@@ -70,6 +78,9 @@ class ContractBackend:
         self.malformed = False
         self.malformed_opportunity_meta = False
         self.network_error = False
+        self.live = live
+        self.live_omit_aggregations = False
+        self.live_opportunity_field_value_string = False
 
     @staticmethod
     def _request_fields(body: dict) -> list[dict]:
@@ -80,8 +91,14 @@ class ContractBackend:
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
-        assert request.headers["Authorization"] == "Bearer local-test-token"
-        assert request.headers["Version"] == "v3"
+        assert request.headers["Authorization"] == (
+            "Bearer live-test-token" if self.live else "Bearer local-test-token"
+        )
+        assert request.headers["Version"] == (
+            "2021-07-28"
+            if self.live and request.method == "GET" and request.url.path == "/contacts/"
+            else "v3"
+        )
         assert request.headers["Accept"] == "application/json"
         if self.network_error:
             raise httpx.ConnectError("controlled", request=request)
@@ -94,6 +111,23 @@ class ContractBackend:
             )
         if self.malformed:
             return httpx.Response(200, content=b"not-json")
+
+        if self.live and request.method == "GET" and request.url.path == "/contacts/":
+            assert request.url.params["locationId"] == "live_location_reference"
+            return httpx.Response(200, json={"contacts": list(self.contacts.values()), "meta": {}})
+        if self.live and request.method == "POST" and request.url.path == "/contacts/":
+            body = json.loads(request.content)
+            contact = {
+                "id": "live_contact_adapter",
+                "firstName": body["firstName"],
+                "lastName": body["lastName"],
+                "email": body.get("email"),
+                "phone": body.get("phone"),
+                "locationId": body["locationId"],
+                "customFields": self._request_fields(body),
+            }
+            self.contacts[contact["id"]] = contact
+            return httpx.Response(201, json={"contact": contact})
 
         if request.method == "POST" and request.url.path == "/contacts/upsert":
             body = json.loads(request.content)
@@ -157,24 +191,34 @@ class ContractBackend:
             page = int(request.url.params.get("page", "1"))
             limit = int(request.url.params.get("limit", "20"))
             start = (page - 1) * limit
-            return httpx.Response(
-                200,
-                json={
-                    "opportunities": matches[start : start + limit],
-                    "meta": (
-                        "not-an-object"
-                        if self.malformed_opportunity_meta
-                        else {"total": len(matches), "currentPage": page}
-                    ),
-                    "aggregations": {},
-                },
-            )
+            response = {
+                "opportunities": matches[start : start + limit],
+                "meta": (
+                    "not-an-object"
+                    if self.malformed_opportunity_meta
+                    else {"total": len(matches), "currentPage": page}
+                ),
+            }
+            if not (self.live and self.live_omit_aggregations):
+                response["aggregations"] = {}
+            return httpx.Response(200, json=response)
         if request.method == "POST" and request.url.path == "/opportunities/":
             body = json.loads(request.content)
             opportunity = {
                 "id": "sim_opportunity_adapter",
                 **body,
-                "customFields": self._request_fields(body),
+                "customFields": (
+                    [
+                        {
+                            "id": field["id"],
+                            "type": "TEXT",
+                            "fieldValueString": field["fieldValue"],
+                        }
+                        for field in body.get("customFields", [])
+                    ]
+                    if self.live and self.live_opportunity_field_value_string
+                    else self._request_fields(body)
+                ),
             }
             self.opportunities[opportunity["id"]] = opportunity
             return httpx.Response(201, json={"opportunity": opportunity})
@@ -189,6 +233,24 @@ def configured_client(backend: ContractBackend) -> HighLevelClient:
     return HighLevelClient(
         highlevel_settings(), transport=httpx.MockTransport(backend)
     )
+
+
+def live_settings(**changes) -> Settings:
+    values = {
+        "crm_provider_mode": "highlevel_live",
+        "highlevel_live_token": SecretStr("live-test-token"),
+        "highlevel_location_id": "live_location_reference",
+        "highlevel_pipeline_id": "live_pipeline_hvac",
+        "highlevel_stage_new_lead_id": "live_stage_new_lead",
+        "highlevel_stage_contacted_id": "live_stage_contacted",
+        "highlevel_stage_appointment_booked_id": "live_stage_appointment_booked",
+        "highlevel_contact_submission_field_id": "live_cf_submission_id",
+        "highlevel_contact_correlation_field_id": "live_cf_correlation_id",
+        "highlevel_opportunity_submission_field_id": "live_of_submission_id",
+        "highlevel_timeout_seconds": 0.1,
+    }
+    values.update(changes)
+    return Settings(_env_file=None, **values)
 
 
 def contact_record(
@@ -213,6 +275,35 @@ def contact_record(
             },
             {
                 "id": "sim_cf_correlation_id",
+                "value": str(correlation_id or payload.correlation_id),
+            },
+        ],
+    }
+
+
+def live_contact_record(
+    payload: CRMLeadCreate,
+    contact_id: str,
+    *,
+    email: str,
+    phone: str,
+    submission_id: uuid.UUID | None = None,
+    correlation_id: uuid.UUID | None = None,
+) -> dict:
+    return {
+        "id": contact_id,
+        "firstName": "Avery",
+        "lastName": "Furnace",
+        "email": email,
+        "phone": phone,
+        "locationId": "live_location_reference",
+        "customFields": [
+            {
+                "id": "live_cf_submission_id",
+                "value": str(submission_id or payload.submission_id),
+            },
+            {
+                "id": "live_cf_correlation_id",
                 "value": str(correlation_id or payload.correlation_id),
             },
         ],
@@ -257,6 +348,113 @@ def test_documented_contact_and_opportunity_mapping_and_reconciliation():
     assert opportunity_body["customFields"] == [
         {"id": "sim_of_submission_id", "fieldValue": str(payload.submission_id)}
     ]
+
+
+def test_live_mode_uses_pit_contact_listing_and_create_without_lookup_or_upsert():
+    backend = ContractBackend(live=True)
+    client = HighLevelClient(live_settings(), transport=httpx.MockTransport(backend))
+    payload = lead_payload()
+
+    client.sync_lead(payload)
+    client.sync_lead(payload)
+
+    paths = [request.url.path for request in backend.requests]
+    assert "/contacts/lookup" not in paths
+    assert "/contacts/search" not in paths
+    assert "/contacts/upsert" not in paths
+    assert sum(
+        request.method == "POST" and request.url.path == "/contacts/"
+        for request in backend.requests
+    ) == 1
+    list_requests = [request for request in backend.requests if request.url.path == "/contacts/"]
+    assert list_requests
+    for request in list_requests:
+        if request.method == "GET":
+            assert request.headers["Version"] == "2021-07-28"
+    contact_body = json.loads(
+        next(
+            request
+            for request in backend.requests
+            if request.method == "POST" and request.url.path == "/contacts/"
+        ).content
+    )
+    assert contact_body["firstName"] == "Avery"
+    assert contact_body["lastName"] == "Furnace"
+    assert contact_body["customFields"] == [
+        {"id": "live_cf_submission_id", "fieldValue": str(payload.submission_id)},
+        {"id": "live_cf_correlation_id", "fieldValue": str(payload.correlation_id)},
+    ]
+    assert len(backend.contacts) == 1
+    assert len(backend.opportunities) == 1
+
+
+def test_live_mode_accepts_observed_optional_aggregations_and_field_value_string():
+    backend = ContractBackend(live=True)
+    backend.live_omit_aggregations = True
+    backend.live_opportunity_field_value_string = True
+    client = HighLevelClient(live_settings(), transport=httpx.MockTransport(backend))
+    payload = lead_payload()
+
+    client.sync_lead(payload)
+
+    assert client.reconcile(payload) is True
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://services.leadconnectorhq.com", "https://example.test", "https://services.leadconnectorhq.com/api"],
+)
+def test_live_mode_requires_the_official_https_host(base_url):
+    with pytest.raises(ValueError, match="official HTTPS"):
+        live_settings(highlevel_live_base_url=base_url)
+
+
+def test_live_and_simulator_credentials_are_not_interchangeable():
+    with pytest.raises(ValueError, match="HIGHLEVEL_SIMULATOR_TOKEN"):
+        Settings(
+            _env_file=None,
+            crm_provider_mode="highlevel_simulator",
+            highlevel_base_url="http://127.0.0.1:18080",
+            highlevel_simulator_token=None,
+        )
+    with pytest.raises(ValueError, match="HIGHLEVEL_LIVE_TOKEN"):
+        Settings(_env_file=None, crm_provider_mode="highlevel_live", highlevel_live_token=None)
+
+
+def test_live_pit_listing_refuses_foreign_and_ambiguous_identifier_matches():
+    backend = ContractBackend(live=True)
+    client = HighLevelClient(live_settings(), transport=httpx.MockTransport(backend))
+    payload = lead_payload()
+    backend.contacts["live_foreign"] = live_contact_record(
+        payload,
+        "live_foreign",
+        email=str(payload.email),
+        phone=payload.phone,
+        submission_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(HighLevelProviderError, match="different application") as foreign:
+        client.sync_lead(payload)
+    assert foreign.value.error_class == "highlevel_identity_conflict"
+    assert not any(request.method == "POST" for request in backend.requests)
+
+    backend.contacts.clear()
+    backend.contacts["live_expected_one"] = live_contact_record(
+        payload,
+        "live_expected_one",
+        email=str(payload.email),
+        phone="+16045550991",
+    )
+    backend.contacts["live_expected_two"] = live_contact_record(
+        payload,
+        "live_expected_two",
+        email=str(payload.email),
+        phone="+16045550992",
+    )
+    with pytest.raises(HighLevelProviderError, match="ambiguous") as ambiguous:
+        client.sync_lead(payload)
+    assert ambiguous.value.error_class == "highlevel_identity_conflict"
 
 
 def test_provider_replay_keeps_one_local_and_one_external_business_effect(db):
@@ -561,8 +759,13 @@ def test_non_e164_phone_is_rejected_before_any_external_request():
     ("status_code", "error_class", "retry_after"),
     [
         (401, "highlevel_authentication", None),
+        (403, "highlevel_authentication", None),
+        (400, "highlevel_validation", None),
+        (409, "highlevel_validation", None),
+        (422, "highlevel_validation", None),
         (429, "highlevel_rate_limited", "7"),
         (500, "highlevel_upstream_failure", None),
+        (503, "highlevel_upstream_failure", None),
     ],
 )
 def test_error_translation(status_code, error_class, retry_after):
@@ -758,12 +961,12 @@ def test_opportunity_reconciliation_does_not_treat_missing_identity_data_as_abse
     assert captured.value.error_class == "highlevel_malformed_response"
 
 
-def test_provider_modes_preserve_development_and_fail_closed_for_live():
+def test_provider_modes_preserve_development_and_require_live_configuration():
     assert isinstance(
         build_crm_provider(Settings(_env_file=None, crm_provider_mode="development")),
         DevelopmentCRMProvider,
     )
-    with pytest.raises(RuntimeError, match="intentionally unavailable"):
+    with pytest.raises(ValueError, match="HIGHLEVEL_LIVE_TOKEN"):
         build_crm_provider(Settings(_env_file=None, crm_provider_mode="highlevel_live"))
 
 

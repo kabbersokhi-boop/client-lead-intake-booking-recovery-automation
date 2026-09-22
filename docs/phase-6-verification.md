@@ -12,9 +12,11 @@ customer-critical orchestration and the existing recovery workflow still owns re
 attempt budgets, `Retry-After`, and reconciliation. The simulator owns only its isolated external
 test representation and sanitized API-event history.
 
-Live HighLevel authentication, account-specific mappings, responses, limits, and side effects
-were not verified because API access was unavailable. `highlevel_live` fails closed with an
-explicit configuration error.
+`highlevel_live` is separately configured and pins its endpoint to the official HTTPS host. Live
+resource provisioning and response-shape inspection are recorded in
+`docs/phase-6-live-highlevel-verification.md`. That record includes a controlled synthetic
+website/n8n/FastAPI/PostgreSQL/live-HighLevel intake and exact replay. It remains an external
+projection: PostgreSQL and the existing recovery system retain application/reliability ownership.
 
 ## Architecture selected
 
@@ -42,7 +44,7 @@ simulator contact and opportunity IDs never replace application correlation trut
 | --- | --- |
 | `development` | Default. Existing `DevelopmentCRMProvider`; no HighLevel claim or external HTTP effect. |
 | `highlevel_simulator` | Local Lead persistence plus the HighLevel-specific HTTP adapter targeting an allowlisted local simulator URL only. |
-| `highlevel_live` | Intentionally unavailable until credentials/access and real account mappings are reviewed and verified. |
+| `highlevel_live` | Optional PIT-authenticated external projection with separate credentials, official-host pinning, provisioned mapping IDs, and fail-closed identity reconciliation. |
 
 Simulator URL: `http://localhost:18080`. The browser surface and backend remain loopback-bound.
 The adapter target and local simulator token come from ignored/protected environment
@@ -160,8 +162,8 @@ the path for jobs whose external outcome is still uncertain.
 
 This is at-least-once delivery/retries with idempotent business effects and explicit
 reconciliation. It is not a universal exactly-once claim. The exact contact lookup endpoint is
-officially OAuth-only, so live use of this strategy requires OAuth access or a separately reviewed
-supported reconciliation design.
+officially OAuth-only, so live PIT reconciliation uses a bounded location contact list with strict
+local exact matching and stable identity fields; it never sends a PIT to `/contacts/lookup`.
 
 External contact/opportunity IDs are not persisted in the application database in this fallback;
 the adapter reconciles from stable custom fields on each unfinished job. That is sufficient for
@@ -211,10 +213,11 @@ rewrite, opportunity stage mapping, 401, 429 and `Retry-After`, 500, timeout, ma
 strict simulator validation, event redaction, one-shot reset, provider-mode truth, the unchanged
 development provider, and durable recovery ownership around a simulated 429.
 
-The complete verifier runs 153 Python tests, 28 frontend/helper tests, and 43 workflow tests: 224
-tests total. It also runs Ruff across the application, simulator, tests, and demo helper; checks
-simulator JavaScript syntax; parses tracked workflow/fixture JSON; checks shell syntax; validates
-Docker Compose; runs `git diff --check`; and scans tracked content for secret patterns.
+The current checked-out verification command runs 154 Python tests (11 skipped), three browser
+test files, and four workflow test files. It also runs focused Ruff on the changed Python code,
+checks the helper scripts compile, validates Docker Compose, runs `git diff --check`, and scans
+the working tree for credential patterns. The legacy wider verifier counts above must not be used
+as a claim about this live verification run.
 
 ## Controlled live-local evidence
 
