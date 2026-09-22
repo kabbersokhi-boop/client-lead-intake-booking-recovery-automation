@@ -7,6 +7,10 @@ Future phases must update this document before their final commit so the reposit
 ## Current checkpoint
 
 - Review date: 2026-09-23.
+- Presentation checkpoint: the current README and curated visual case study are being prepared
+  from starting SHA `b1095f08d8cd34708def90f0878024663b17b9fa`. The README includes ten primary
+  screenshots and two supporting HighLevel configuration screenshots under `docs/assets/readme/`;
+  final SHA and exact-SHA CI are reported after push.
 - The local interview/demo runtime is persistently configured for `highlevel_live` in ignored,
   mode-600 `.env`. The 2026-09-23 website-originated synthetic Contact/Opportunity, exact replay,
   post-recreate runtime check, and adapter-key rotation are documented in
@@ -53,8 +57,8 @@ Future phases must update this document before their final commit so the reposit
   The pre-7B polish clarifies the
   business-first request/booking/trace journey, historical diagnostic incidents, workflow groups,
   truthful email wording, and simulator API-event sequence without changing durable semantics.
-  Phase 7B screenshots, final case study, browser rehearsal, and final interview PDF remain
-  incomplete.
+  The 2026-09-23 case-study pass completes README/screenshots packaging only. A timed browser
+  rehearsal and final interview PDF remain separate follow-up deliverables.
 - Approval does not assert universal bug freedom, production readiness, or a guaranteed hiring outcome.
 
 Before new work, verify that current `HEAD`, `origin/main`, the worktree, runtime, and CI still match the intended starting point. Do not assume this recorded SHA is still current.
@@ -307,7 +311,7 @@ recovery role. Never present the simulator as a HighLevel sandbox or as live-ven
 The separate `docs/phase-6-live-highlevel-verification.md` record now supports the verified live
 Contact/Opportunity claim.
 
-## Phase 7 — presentation hardening and remaining work
+## Phase 7 — presentation hardening and case-study packaging
 
 Phase 7A improves only presentation clarity. It preserves the approved architecture, retained
 execution history, recovery truth model, and read-only Operations surface. The deterministic
@@ -325,9 +329,11 @@ CRM effect. `DevelopmentCRMProvider` remains the distinct safe-default local Lea
 persistence implementation. The retained simulator remains the deterministic local fault harness;
 automatic HighLevel lifecycle-stage and appointment/calendar synchronization are not wired.
 
-The remaining Phase 7B work is screenshot selection/redaction, Google Sheets dashboard polish,
-final README case-study polish, browser rehearsal, and rebuilding the final interview PDF. Do not
-treat those deliverables as complete.
+The README case study and curated screenshot set are the current Phase 7B deliverable. The
+repository includes ten primary story images and two supporting HighLevel configuration images;
+the previously unsafe adapter-key screenshot remains excluded. The README distinguishes live
+HighLevel evidence, simulator-only faults, Mailpit development email, and downstream reporting.
+The broader timed browser rehearsal and final interview PDF remain incomplete.
 
 ### Pre-7B system polish status
 
@@ -350,9 +356,9 @@ The system-wide readiness pass is complete for the implemented local boundary:
   simulator sections, and retained Mailpit messages. No customer-critical or external integration
   was invoked to produce polish evidence.
 
-See `docs/pre-7b-readiness-review.md` for the complete gate record. This pass did not build the
-manager-facing Google Sheets dashboard, final visual README, final screenshot set, timed rehearsal,
-interview Q&A package, or final PDF.
+See `docs/pre-7b-readiness-review.md` for the complete gate record. The manager-facing Google
+Sheets dashboard is now present as separate live reporting evidence. This case-study pass does not
+claim to complete the timed rehearsal, interview Q&A package, or final PDF.
 
 ### HVAC business wording and email polish
 
@@ -366,7 +372,7 @@ interview Q&A package, or final PDF.
 - Give each follow-up a truthful purpose and usable next step. Do not add fake booking buttons, unsupported reply handling, fictitious contact details, or unsupported appointment-management links.
 - No additional model call is required solely to polish deterministic wording.
 
-### GitHub as a visual engineering case study
+### GitHub case-study package
 
 - Keep the README concise and readable; place detailed walkthroughs under `docs/` rather than creating a wall of screenshots.
 - Add selected real screenshots with short captions explaining the business action, observed result, failure, diagnosis, correction, and verification.
@@ -379,6 +385,13 @@ interview Q&A package, or final PDF.
 - Use only completed implementation evidence. Do not invent, cosmetically falsify, or stage results that the system did not produce.
 - Remove secrets, webhook URLs, auth headers, unrelated account data, and real personal data. Retain only synthetic customer examples.
 - Finish the README only after the external-integration status is known, so it accurately distinguishes local, configured, and live-verified components.
+
+The 2026-09-23 README now follows the verified customer journey, explains the durable recovery
+boundary and controlled execution `283` failure, presents the live HighLevel and Make/Sheets
+evidence, lists all seven project workflows, and states the lifecycle/calendar/email limits.
+Before release, validate all relative image links and binary content, run the established verifier,
+scan tracked content for secrets, inspect the final diff, then push and confirm CI on the exact
+published SHA.
 
 ### Interview PDF and teaching material
 
