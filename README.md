@@ -1,16 +1,24 @@
-# HVAC Lead Intake, Booking & Recovery Automation
+# HVAC Lead Automation — n8n, GoHighLevel, Booking, Recovery & Reporting
 
-An end-to-end reference implementation for capturing HVAC enquiries, projecting them to a CRM, managing a local booking/follow-up lifecycle, recovering uncertain CRM writes, and producing management reports.
+An end-to-end HVAC automation system that captures service enquiries, validates and enriches service context, persists durable workflow state, creates real HighLevel Contacts and Opportunities, supports booking and follow-up automation, safely recovers uncertain CRM writes, and feeds aggregate management reporting through Make and Google Sheets.
 
-**This is a technical interview/reference build using synthetic customer data, not a historical production client deployment.** Its initial Contact and Opportunity projection was verified against a real HighLevel sub-account. Faults shown here were injected against a controlled local simulator.
-
-`n8n` · `FastAPI` · `PostgreSQL` · `HighLevel` · `NVIDIA NIM` · `Make` · `Google Sheets` · `Mailpit` · `Docker Compose`
+`n8n` · `HighLevel (GoHighLevel)` · `Make` · `FastAPI` · `PostgreSQL` · `NVIDIA NIM` · `Google Sheets` · `Mailpit` · `Docker Compose`
 
 [![Backend CI](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/actions/workflows/ci.yml)
 
+## 60-second overview
+
+- Capture and validate HVAC service enquiries through a customer-facing web form.
+- Use NVIDIA NIM only for bounded, schema-validated service-context extraction; fall back safely if AI is unavailable or unusable.
+- Persist the canonical lead, lifecycle state, CRM delivery intent, attempts, and recovery evidence in PostgreSQL behind FastAPI.
+- Project each verified lead into a real HighLevel (GoHighLevel) sub-account as a Contact plus Opportunity in **HVAC Service Pipeline → New Lead**.
+- Support a separate local booking/follow-up lifecycle with replay-safe behavior and development email evidence in Mailpit.
+- Recover throttled, transient, timeout, and uncertain CRM writes by reconciling stable identity before retrying.
+- Send sanitized aggregate reporting through n8n → Make → Google Sheets without putting customer PII into the management dashboard.
+
 ## The customer journey
 
-A customer submits an HVAC service request. n8n validates and normalizes it, optionally extracts service context, and sends a prepared request to FastAPI. FastAPI and PostgreSQL retain the application record and CRM-delivery job before the CRM projection is attempted. The verified live path creates a Contact and Opportunity in HighLevel. The separate local lifecycle supports a demonstration booking or follow-up and sends development email to Mailpit. A downstream reporting flow turns database aggregates into a Google Sheets management view.
+A customer submits an HVAC service request. n8n validates and normalizes it, optionally extracts service context, and sends a prepared request to FastAPI. FastAPI and PostgreSQL retain the application record and CRM-delivery job before any external CRM effect is trusted. The verified live path then creates a real Contact and Opportunity in HighLevel (GoHighLevel). The separate local lifecycle supports a demonstration booking or follow-up and sends development email to Mailpit. A downstream reporting flow turns database aggregates into a Google Sheets management view.
 
 ```mermaid
 flowchart TB
@@ -40,6 +48,51 @@ flowchart TB
 
 The boundaries are deliberate: **n8n orchestrates; PostgreSQL remembers; FastAPI owns application and recovery operations; the HighLevel adapter owns vendor-specific projection and reconciliation.** The simulator sits outside the live happy path.
 
+## Real HighLevel (GoHighLevel) CRM integration
+
+HighLevel is a first-class external system in this project, not a mock endpoint. The verified live path uses a protected **Private Integration Token (PIT)** to project the durable application record into the **Surrey HVAC Automation Demo** sub-account.
+
+The live CRM setup includes:
+
+- real Contact creation/upsert;
+- real Opportunity creation in **HVAC Service Pipeline → New Lead**;
+- stable integration identity fields for Contact submission ID, Contact correlation ID, and Opportunity submission ID;
+- reconciliation by stable submission identity before an unfinished write is retried;
+- exact replay evidence showing one logical Contact and one logical Opportunity rather than duplicate business effects;
+- a native **HVAC Lead Acknowledgement** workflow configured on the New Lead stage;
+- a selective Snapshot containing the reusable pipeline, workflow, and integration identity fields.
+
+The local demo runtime persists `highlevel_live` in ignored, protected `.env` configuration. A clean Compose recreate verified that the live mode and its resource mappings persist. The tracked `.env.example` remains safe and defaults to development. PostgreSQL remains the application and reliability truth; HighLevel is the external CRM projection.
+
+The live Jordan Lee verification created a Contact with the synthetic integration email and phone, then a linked **Jordan Lee - HVAC enquiry** Opportunity in the HVAC Service Pipeline at **New Lead**. The same logical website submission was replayed with the same identities and customer fields; the browser received a replay acknowledgement, the durable job remained completed with one attempt, and the HighLevel audit still found one matching Contact and one matching Opportunity.
+
+![Synthetic Jordan Lee Contact in the real HighLevel sub-account](docs/assets/readme/03_highlevel_contact_jordan_live.png)
+
+*The live vendor Contact carries the synthetic submission and correlation identity and shows the linked opportunity activity.*
+
+![Synthetic Jordan Lee Opportunity in HVAC Service Pipeline at New Lead](docs/assets/readme/04_highlevel_opportunity_new_lead.png)
+
+*The real Opportunity is linked to Jordan Lee, assigned to the HVAC pipeline's New Lead stage, and carries a synthetic C$0 value.*
+
+The sub-account also contains a native **HVAC Lead Acknowledgement** workflow. Its trigger is **Pipeline stage changed → HVAC Service Pipeline → New Lead** and it has a **Send Acknowledgement Email** action personalized with `{{contact.first_name}}`. It remains **Draft/unpublished** because this demo sub-account is not configured as a production sender. The workflow configuration proves the native HighLevel automation setup; the booking email shown later is a separate Mailpit development path.
+
+<details>
+<summary>Supporting HighLevel configuration screenshots</summary>
+
+![Draft native HighLevel acknowledgement workflow](docs/assets/readme/11_highlevel_native_ack_workflow.png)
+
+*The native workflow contains the New Lead pipeline-stage trigger and personalized acknowledgement action. It is deliberately unpublished.*
+
+![Selective HighLevel Snapshot](docs/assets/readme/12_highlevel_interview_snapshot.png)
+
+*The reusable Snapshot contains three integration identity custom fields, the HVAC Service Pipeline, and the acknowledgement workflow. It does not contain Contacts, Opportunities, or their history.*
+
+</details>
+
+**Known lifecycle boundary:** initial Contact and Opportunity projection to HighLevel is live and verified. Later local `contacted` or `appointment_booked` state does not automatically move the existing HighLevel Opportunity stage. A sound implementation needs its own durable desired-state/outbox process with retries, reconciliation, supersession/versioning, and lost-ack handling. The local appointment also does not synchronize to a HighLevel calendar.
+
+The live integration path, resource provisioning, exact replay, and clean Compose recreate are recorded in the [HighLevel live verification](docs/phase-6-live-highlevel-verification.md).
+
 ## Enquiry to CRM
 
 The website assigns a stable `submission_id` to the business operation and a `correlation_id` to trace that operation across the workflow. n8n rejects invalid requests before the model call, normalizes customer fields, validates any model result, and asks FastAPI to persist the canonical payload. A CRM acknowledgement is accepted only when its identity and lifecycle shape match the request; an unfinished durable write is reported as queued rather than as a fabricated CRM success.
@@ -52,19 +105,7 @@ The website assigns a stable `submission_id` to the business operation and a `co
 
 *This successful execution validates the request, extracts bounded service context, checks the extraction, persists through FastAPI, and returns the verified result.*
 
-The live integration was exercised through the website, n8n, FastAPI, PostgreSQL, and the real HighLevel sub-account. The synthetic Jordan Lee Contact shows the integration identity fields and a linked Opportunity activity. The Opportunity is in the vendor UI under **HVAC Service Pipeline → New Lead**, with a synthetic C$0 value.
-
-![Synthetic Jordan Lee Contact in the real HighLevel sub-account](docs/assets/readme/03_highlevel_contact_jordan_live.png)
-
-*The live vendor Contact carries the synthetic submission and correlation identity and shows the linked opportunity activity.*
-
-![Synthetic Jordan Lee Opportunity in HVAC Service Pipeline at New Lead](docs/assets/readme/04_highlevel_opportunity_new_lead.png)
-
-*The real Opportunity is linked to Jordan Lee, assigned to the HVAC pipeline's New Lead stage, and carries a synthetic C$0 value.*
-
-The same website submission was replayed with the same identities and customer fields. The browser received a replay acknowledgement, the durable job remained completed with one attempt, and the HighLevel audit still found one matching Contact and one Opportunity. This is **at-least-once delivery/retry with idempotent business effects and explicit reconciliation**, not a universal exactly-once guarantee.
-
-The live integration path, resource provisioning, exact replay, and clean Compose recreate are recorded in the [HighLevel live verification](docs/phase-6-live-highlevel-verification.md).
+The HighLevel projection is designed around stable business identity rather than blind create calls. A replay of the same logical submission returns the persisted result when the external effects are already verified. This is **at-least-once delivery/retry with idempotent business effects and explicit reconciliation**, not a universal exactly-once guarantee.
 
 ## Booking and local email lifecycle
 
@@ -128,29 +169,6 @@ The full retained evidence chain, including the error recorder and later batch r
 
 `submission_id` identifies the logical business operation that should be applied once. `correlation_id` follows that operation through intake, persistence, attempts, incidents, and trace views. They answer different questions: “Which request is this?” and “Where did it travel?”
 
-## Real HighLevel integration
-
-The live sub-account has the **HVAC Service Pipeline** with **New Lead**, **Contacted**, and **Appointment Booked** stages, plus three identity custom fields: Contact submission ID, Contact correlation ID, and Opportunity submission ID. The adapter uses a protected Private Integration Token for server-to-server requests, pins the API host, and reconciles the expected Contact/Opportunity identity before retrying unfinished work. No token or vendor resource ID is included here.
-
-The local interview runtime currently persists `highlevel_live` in ignored, protected `.env` configuration. A clean Compose recreate verified that mode and its resource mappings persisted. The tracked `.env.example` remains safe and defaults to `development`. PostgreSQL remains application and reliability truth; HighLevel is the external CRM projection.
-
-The sub-account also contains a native **HVAC Lead Acknowledgement** workflow. Its trigger is **Pipeline stage changed → HVAC Service Pipeline → New Lead** and it has a **Send Acknowledgement Email** action personalized with `{{contact.first_name}}`. It remains **Draft/unpublished** because this demo sub-account is not configured as a production sender. The screenshot below is configuration evidence only; the booking email shown above is a separate Mailpit demonstration.
-
-<details>
-<summary>Supporting HighLevel configuration screenshots</summary>
-
-![Draft native HighLevel acknowledgement workflow](docs/assets/readme/11_highlevel_native_ack_workflow.png)
-
-*The native workflow contains the New Lead pipeline-stage trigger and personalized acknowledgement action. It is deliberately unpublished.*
-
-![Selective HighLevel Interview Snapshot](docs/assets/readme/12_highlevel_interview_snapshot.png)
-
-*The reusable Snapshot contains three integration identity custom fields, the HVAC Service Pipeline, and the acknowledgement workflow. It does not contain Contacts, Opportunities, or their history.*
-
-</details>
-
-**Known lifecycle boundary:** initial Contact and Opportunity projection to HighLevel is live and verified. Later local `contacted` or `appointment_booked` state does not automatically move the existing HighLevel Opportunity stage. A sound implementation needs its own durable desired-state/outbox process with retries, reconciliation, supersession/versioning, and lost-ack handling. The local appointment also does not synchronize to a HighLevel calendar.
-
 ## Management reporting
 
 Reporting is deliberately downstream of customer intake:
@@ -213,11 +231,11 @@ The recovery boundary also covers stable replay, canonical stored payloads, boun
 
 ## Verification and limits
 
-The deterministic CI suite runs **165 Python tests**, **32 browser/helper tests across three suites**, and **45 n8n workflow tests**. The focused HighLevel adapter subset contains **58 tests; all are included in and passed as part of the 165 Python tests**, not additive. CI also runs Ruff. The retained exact-SHA run for checkpoint `b1095f08d8cd34708def90f0878024663b17b9fa` passed as [Backend CI run 35795367301](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/actions/runs/35795367301). Live HighLevel, NVIDIA, Make/Sheets, n8n, and Mailpit checks are separately documented; they are not represented as deterministic CI tests.
+The deterministic CI suite runs **165 Python tests**, **32 browser/helper tests across three suites**, and **45 n8n workflow tests**. The focused HighLevel adapter subset contains **58 tests; all are included in and passed as part of the 165 Python tests**, not additive. CI also runs Ruff. The retained exact-SHA run for final README/architecture checkpoint `c34905a4d551abc64df6b87e561ffa52b27fe9a3` passed as [Backend CI run 35799790747](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/actions/runs/35799790747). Live HighLevel, NVIDIA, Make/Sheets, n8n, and Mailpit checks are separately documented; they are not represented as deterministic CI tests.
 
 Current boundaries:
 
-- Synthetic reference/interview data; not historical production customer traffic.
+- Synthetic demonstration data; not historical production customer traffic.
 - Real HighLevel evidence covers initial Contact and Opportunity projection and exact replay. Automatic later lifecycle-stage sync is not implemented.
 - Local appointment state does not reserve a technician or external calendar slot.
 - Mailpit is not production email, and SMTP acceptance cannot be made atomic with the later database commit.
@@ -249,4 +267,4 @@ For a fresh checkout, copy the safe root [`.env.example`](.env.example) to `.env
 docker compose up --build
 ```
 
-The website is served at `http://localhost:18000`; Mailpit is at `http://localhost:18025`, and the isolated simulator UI is at `http://localhost:18080`. Import the sanitized n8n exports and configure any external-provider secrets only in protected runtime storage. This workstation's ignored `.env` is already configured for `highlevel_live`; never replace or publish that protected configuration. See the [`interview demo runbook`](docs/interview-demo-runbook.md) for the browser walkthrough.
+The website is served at `http://localhost:18000`; Mailpit is at `http://localhost:18025`, and the isolated simulator UI is at `http://localhost:18080`. Import the sanitized n8n exports and configure any external-provider secrets only in protected runtime storage. This workstation's ignored `.env` is already configured for `highlevel_live`; never replace or publish that protected configuration. See the [browser demo runbook](docs/interview-demo-runbook.md) for the walkthrough.
