@@ -1,331 +1,145 @@
-# HVAC Lead Automation — n8n, GoHighLevel, Recovery & Reporting
+# HVAC lead intake, booking, and CRM recovery
 
-An end-to-end HVAC lead automation system that captures service enquiries, validates and enriches context, persists durable workflow state, projects verified records into HighLevel (GoHighLevel), supports booking and follow-up lifecycle automation, recovers uncertain CRM writes, and publishes aggregate management reporting through Make and Google Sheets.
+An HVAC enquiry is useful only if the business can act on it. This system accepts a service request, preserves it through an uncertain CRM write, follows up or saves a local appointment, and produces a daily management view. The interesting part is what happens between “the webhook ran” and “the intended customer effect exists”: the application keeps durable work, verifies external identity, and recovers partial failures without blindly creating another record.
 
-\`n8n\` · \`HighLevel (GoHighLevel)\` · \`FastAPI\` · \`PostgreSQL\` · \`NVIDIA NIM\` · \`Make\` · \`Google Sheets\` · \`Mailpit\` · \`Docker Compose\`
+**Stack:** JavaScript browser UI and n8n workflows; FastAPI/Python and PostgreSQL for application state; a real HighLevel Contact and Opportunity integration over REST using a Private Integration Token (PIT); optional NVIDIA NIM extraction; development email through Mailpit; and downstream Make.com → Google Sheets reporting. Docker Compose runs the local API, database, CRM contract simulator, and mail sink.
 
-[![Backend CI](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/actions/workflows/ci.yml)
-
-## What this system does
-
-| Capability | Implementation |
-| --- | --- |
-| Lead capture | Customer-facing form → n8n validation/normalization → FastAPI |
-| AI enrichment | NVIDIA NIM extracts bounded service context; invalid or unavailable output falls back safely |
-| CRM projection | Real HighLevel Contact + Opportunity in **HVAC Service Pipeline → New Lead** |
-| Durable state | PostgreSQL stores canonical lead, lifecycle, audit, CRM job, attempt, lease and incident state |
-| Lifecycle | Replay-safe local booking, scheduled follow-up, cancellation rules and development email |
-| Recovery | Reconciliation-before-retry, bounded attempts, \`Retry-After\`, leases, quota pacing and operator review |
-| Operations | Read-only recovery dashboard with job, attempt, incident and trace visibility |
-| Reporting | FastAPI aggregates → n8n → Make → Google Sheets dashboard, without customer PII |
-
-The core design is intentionally split by responsibility:
-
-> **n8n orchestrates. PostgreSQL remembers. FastAPI owns the application and reliability boundary. HighLevel is the external CRM projection. The simulator is the deterministic failure laboratory.**
-
-## Architecture
-
-\`\`\`mermaid
-flowchart TB
-    C[Customer] --> W[Website request form]
-    W --> I[n8n · Lead Intake]
-    I --> V{Request valid?}
-    V -- "no" --> X[Return validation error]
-    V -- "yes" --> N[Optional NVIDIA NIM extraction<br/>validated result or safe fallback]
-    N --> A[FastAPI application boundary]
-    A --> P[(PostgreSQL<br/>durable application + recovery state)]
-    A --> H[HighLevel adapter]
-    H --> HL[REAL HighLevel sub-account<br/>Contact + Opportunity<br/>HVAC Service Pipeline · New Lead]
-
-    W --> B[n8n · Appointment Booking]
-    B --> A
-    F[Scheduled n8n · Follow-up Dispatch] -- "poll due items" --> A
-    A --> M[SMTP development email]
-    M --> MP[Mailpit · local test inbox]
-
-    P --> R[FastAPI · aggregate reporting endpoint]
-    R --> MR[n8n · Management Reporting]
-    MR --> MK[Make]
-    MK --> S[Google Sheets dashboard]
-
-    H -. "separate fault-test configuration" .-> SIM[Local HighLevel contract simulator<br/>deterministic failure laboratory]
-\`\`\`
-
-A valid enquiry is persisted before an external CRM effect is trusted. Workflow executions can end; the durable record of what should happen, what was attempted, and what completed survives in PostgreSQL.
-
-## HighLevel (GoHighLevel) CRM integration
-
-HighLevel is a real external integration in this project, not a simulated happy path. The live adapter uses a protected **Private Integration Token (PIT)** against the official HighLevel API and was verified end to end through the website, n8n, FastAPI/PostgreSQL and a real HighLevel sub-account.
-
-### What the integration owns
-
-| Area | Behavior |
-| --- | --- |
-| Contact projection | Reuse an application-owned matching Contact or create one when safely absent |
-| Opportunity projection | Create/reconcile the matching Opportunity in **HVAC Service Pipeline → New Lead** |
-| Stable identity | Contact stores submission + correlation identity; Opportunity stores submission identity |
-| Replay safety | Reconcile existing CRM effects before any repeat create |
-| Identity conflicts | Ambiguous, foreign or mismatched records fail closed instead of being overwritten |
-| Authentication | PIT-based server-to-server integration; OAuth is not claimed or implemented |
-| Provider boundary | HighLevel-specific translation and reconciliation stay behind the FastAPI provider layer |
-| Native automation | A saved **HVAC Lead Acknowledgement** workflow targets the New Lead stage |
-| Reusable configuration | A selective Snapshot contains the pipeline, acknowledgement workflow and integration identity fields |
-
-The custom identity fields are important because email and phone alone are not sufficient business identities. A remote write may commit even if its acknowledgement is lost; the adapter therefore needs a stable way to determine whether the intended Contact and Opportunity already exist before another create is safe.
-
-The live PIT path also validates vendor responses rather than treating any 2xx response as proof. Contact and Opportunity identity, location, pipeline and custom-field linkage are checked before the application accepts reconciliation as complete.
-
-![Synthetic Contact projected into the real HighLevel sub-account](docs/assets/readme/03_highlevel_contact_jordan_live.png)
-
-*Live HighLevel evidence shows an integration-created Contact carrying the application identity fields and linked Opportunity activity.*
-
-![Synthetic Opportunity projected into the HVAC Service Pipeline](docs/assets/readme/04_highlevel_opportunity_new_lead.png)
-
-*The live Opportunity is linked to the projected Contact and placed in HVAC Service Pipeline → New Lead.*
-
-The native acknowledgement workflow remains **Draft/unpublished** because the demo sub-account is not configured as a production sender. Its saved trigger/action configuration is evidence of native HighLevel workflow setup; it is separate from the Mailpit development-email path.
-
-A selective Snapshot packages only reusable CRM configuration: the pipeline, acknowledgement workflow and three integration identity fields. It deliberately excludes Contacts, Opportunities and their history.
-
-**Current lifecycle boundary:** the initial Contact + Opportunity projection is live and verified. Later local \`contacted\` and \`appointment_booked\` transitions do **not** automatically move the existing HighLevel Opportunity stage, and the local appointment does not reserve a HighLevel calendar slot. A production-grade extension should use a separate durable desired-state/outbox process with retries, reconciliation and supersession of stale stage requests rather than an inline booking HTTP call.
-
-The retained live evidence and provider review are in [Phase 6 live HighLevel verification](docs/phase-6-live-highlevel-verification.md), [Phase 6 verification](docs/phase-6-verification.md) and [Phase 6 self-review](docs/phase-6-self-review.md).
-
-## End-to-end customer journey
-
-The browser creates two different identifiers for two different jobs:
-
-- \`submission_id\` identifies the logical business operation that should be applied once.
-- \`correlation_id\` traces that operation across intake, persistence, CRM delivery, attempts, incidents and lifecycle events.
-
-An unchanged browser retry reuses both identifiers. Editing the customer input intentionally creates a new submission identity.
-
-n8n rejects invalid input before the AI call, normalizes contact data while preserving the original message, and optionally asks NVIDIA NIM for service context. FastAPI validates the resulting application contract again, admits the durable CRM job, persists canonical state in PostgreSQL, and projects through the configured CRM provider.
-
-A customer-facing success response is returned only after the expected identity and lifecycle shape are verified. If the application has durably accepted the work but the external CRM effect is not yet confirmed, the response is **queued** rather than fabricating CRM success.
-
-![Saved HVAC request in the customer-facing website](docs/assets/readme/01_website_saved_request.png)
-
-*The customer view presents the saved lifecycle state while keeping low-level identifiers behind expandable technical details.*
-
-![Successful n8n lead-intake execution](docs/assets/readme/02_n8n_intake_success.png)
-
-*The intake workflow validates, normalizes, performs bounded enrichment, persists through FastAPI and returns a contract-checked result.*
-
-## Booking, follow-up and development email
-
-Booking and follow-up are separate workflows from lead intake.
-
-A booking request uses its own stable \`booking_request_id\`. The backend validates Surrey business time (\`America/Vancouver\`), serializes concurrent lifecycle changes with PostgreSQL row locks, persists one appointment, advances the local lifecycle to \`appointment_booked\`, and cancels a still-pending follow-up in the same database transaction. Replaying the same booking is safe; a different second booking for the same lead is a controlled conflict.
-
-The scheduled follow-up workflow polls FastAPI for due pending follow-ups. If follow-up dispatch wins the database lock first, it sends once and moves the local lifecycle to \`contacted\`; if booking wins first, the pending follow-up is cancelled and no follow-up email is sent.
-
-![Successful appointment-booking workflow](docs/assets/readme/05_n8n_appointment_booking_success.png)
-
-*The booking workflow validates the request, persists the lifecycle change, then separately attempts confirmation delivery.*
-
-![Booking confirmation rendered in Mailpit](docs/assets/readme/06_mailpit_booking_confirmation.png)
-
-*Mailpit shows the generated development message with persisted service, location, preferred time and appointment details.*
-
-Mailpit is a local SMTP sink. It proves message generation, personalization, SMTP acceptance and rendering; it does **not** prove production email delivery. The saved local appointment also does not reserve technician capacity or an external calendar.
-
-## Durable CRM delivery and recovery
-
-> **“I didn't just connect n8n directly to HighLevel and hope retries were safe. I separated orchestration, durable state, vendor projection, and deterministic fault testing.”**
-
-A remote CRM write can fail cleanly, be rate-limited, time out, or commit remotely while its acknowledgement is lost. Blindly replaying a create after an uncertain result can duplicate customer records.
-
-The recovery design persists the intended business effect first, then makes the external effect recoverable:
-
-\`\`\`mermaid
+```mermaid
 flowchart TD
-    P[Persist canonical CRM job in PostgreSQL]
-    P --> L[Claim one due job with a bounded lease]
-    L --> R[Reconcile by stable submission identity]
-    R --> E{External effect verified?}
-    E -- "yes" --> C[Complete without another create]
-    E -- "confirmed absent" --> Q[Obtain shared quota permission]
-    E -- "inconclusive" --> H[Defer, block or hold for review]
-    Q --> A[Record a real API attempt]
-    A --> W[Write only the missing CRM effect]
-    W --> V{Response + identity verified?}
-    V -- "yes" --> C
-    V -- "429 / transient / timeout" --> T[Persist failure<br/>honor Retry-After or bounded backoff]
-    V -- "credential / business / identity" --> H
-    T --> P
-\`\`\`
+    Browser[Customer service request] --> Intake[n8n intake workflow]
+    Intake --> AI[Validate and optionally enrich]
+    AI --> API[FastAPI application boundary]
+    API --> DB[(PostgreSQL: leads and durable CRM jobs)]
+    API --> CRM[HighLevel Contact and Opportunity]
+    DB --> Recovery[n8n recovery worker]
+    Recovery --> API
+    Browser --> Booking[n8n booking workflow]
+    Booking --> API
+    Followup[n8n follow-up schedule] --> API
+    API --> Email[Mailpit development email]
+    DB --> Report[FastAPI aggregate report]
+    Report --> Reporting[n8n reporting workflow]
+    Reporting --> Make[Make and Google Sheets]
+```
 
-PostgreSQL retains the prepared payload, payload fingerprint, job state, lease ownership, attempt history, retry timing and incident linkage. Expired leases can be reclaimed; stale workers cannot complete work owned by a newer lease. Scheduling deferrals do not pretend to be API attempts. Authentication failures can pause new claims until operator intervention. Retry history remains visible instead of being reset.
+n8n makes the automation path visible and coordinates webhooks, schedules, HTTP calls, and response checks. FastAPI owns business rules, database transactions, and the vendor adapter. PostgreSQL holds application and recovery truth after any individual n8n execution ends. HighLevel holds the external CRM representation; Make is a separate, non-critical reporting destination. The [architecture notes](docs/architecture.md) describe these boundaries in more detail.
 
-The delivery model is **at-least-once retry with idempotent business effects and explicit reconciliation**. It does not claim universal exactly-once transport semantics.
+## A request enters the system
 
-### Controlled HTTP 429 proof
+The browser creates a `submission_id` for the logical enquiry and a `correlation_id` for tracing it. An unchanged retry keeps those IDs and the original form snapshot. The n8n intake workflow validates name, message, contact method, field lengths and types, UUIDs, and received timestamp before calling AI. It trims processing fields, lowercases email, and preserves the customer's original message separately from normalized text. FastAPI validates the prepared contract again.
 
-Execution **283** is retained evidence from a deliberately orchestrated local fault-injection test. It is **not** a production incident and **not** evidence of a real HighLevel rate limit.
+NVIDIA NIM has one narrow task: extract `service_type`, `location`, `preferred_time`, `urgency`, and `summary` from the service message. Its request asks for JSON, caps output at 180 tokens, and has an 18-second default timeout. The workflow accepts only those five keys, supported service/urgency enums, and bounded, correctly typed text. A malformed or schema-invalid HTTP 200 becomes `fallback_invalid`; a provider error or timeout becomes `fallback_unavailable`. Either fallback sets `needs_review` and lets a valid enquiry continue. AI does not choose contact identity, consent, price, availability, booking truth, technician dispatch, or CRM state. See the [provider diagnostic record](docs/provider-diagnostics.md) for the observed timeout and malformed-success cases.
 
-The test first persisted 12 synthetic CRM jobs, then deliberately sent the prepared batch through an unsafe diagnostic path against the controlled local CRM boundary. Earlier writes committed before a real HTTP 429 caused n8n execution 283 to fail. The Error Trigger workflow recorded the incident while the intended work remained durable in PostgreSQL.
+The decisive handoff is `POST /api/recovery/intake`. FastAPI first commits a unique CRM job containing the prepared canonical payload, its business-data fingerprint, identities, due time, and execution reference. It may then claim and attempt delivery immediately. In live mode, a completed local Lead and verified CRM projection return `201 created` (or `200 replayed`); unfinished durable work returns `202 queued` with a job ID and **no invented CRM lead ID**. n8n checks identity and lifecycle fields before trusting either shape, and the browser validates the returned shape again before showing a saved or queued result. This is the point at which the enquiry is durably accepted, even if the external effect remains pending.
 
-Recovery did not rerun the batch blindly. It reconciled each unfinished job by stable identity, skipped effects that already existed, and wrote only confirmed-missing effects. The final scoped result was **12/12 completed with zero duplicate submission IDs**.
+![Customer request saved in the website](docs/assets/readme/01_website_saved_request.png)
 
-![Controlled local HTTP 429 failure in n8n execution 283](docs/assets/readme/07_controlled_429_failure_execution_283.png)
+*The customer view shows the accepted request and follow-up state; trace identifiers are available in its technical details.*
 
-*The diagnostic path intentionally bypasses normal pacing so a real HTTP 429 can be observed safely against the controlled local boundary.*
+![Successful n8n intake execution](docs/assets/readme/02_n8n_intake_success.png)
 
-![Durable recovery history after the controlled failure](docs/assets/readme/08_durable_recovery_283_to_294.png)
+*The intake execution shows validation, optional extraction, application persistence, and a checked response as separate steps.*
 
-*The durable attempt history preserves the failed 429 and the later verified recovery; the original failed n8n execution remains truthful.*
+PostgreSQL retains `leads`, `follow_ups`, `appointments`, `audit_events`, `crm_write_jobs`, `crm_write_attempts`, `recovery_incidents`, and scoped synthetic fault-run state. A Lead and its initial email follow-up are committed together. The recovery job is admitted independently, so a queued request can exist before a Lead is created. Client `received_at` remains source data; server `created_at` is the trusted persistence timestamp. A correlation trace joins later lifecycle and recovery records.
 
-The full retained chain is documented in [Phase 3 verification](docs/phase-3-verification.md) and the [execution 283 postmortem](docs/phase-3-failed-run-postmortem.md).
+## From local truth to a real HighLevel effect
 
-## Read-only operations view
+Saving locally is not the same as proving the remote CRM effect. In `highlevel_live` mode the adapter uses a protected PIT, pins requests to the official HTTPS API host, and maps into **HVAC Service Pipeline → New Lead**. It uses a bounded location Contact list and exact email/phone comparison because HighLevel's exact lookup endpoint requires OAuth; then it checks two custom application fields: Contact submission ID and correlation ID. It searches Opportunities by the dedicated Opportunity submission ID and verifies the Contact, location, and pipeline linkage. A missing Contact is created and read back to verify identity; a missing Opportunity is created with New Lead and its response is checked. Ambiguous matches, a foreign same-email/phone identity, split email/phone matches, malformed success bodies, or exhausted search windows fail closed.
 
-The project includes a local operator-facing view at \`/operations.html\` for inspecting recovery state without mutating it.
+Email or phone can identify a possible Contact, but neither says *which application request* that Contact represents. A shared address, edited phone, or vendor duplicate rule could otherwise make a retry overwrite someone else's record or create a second Opportunity. Stable custom identity fields let the adapter distinguish an existing effect from a foreign one. The [live HighLevel verification](docs/phase-6-live-highlevel-verification.md) records a synthetic website → n8n → FastAPI/PostgreSQL → HighLevel creation and exact replay: one matching Contact, one linked Opportunity, and no new effect on replay.
 
-It exposes allowlisted projections of:
+![Live HighLevel Contact with integration identity fields](docs/assets/readme/03_highlevel_live_contact.png)
 
-- recovery job counts and state filters;
-- exact lookup by job, submission or correlation ID;
-- selected job state, attempt history and next eligibility;
-- linked incident history and retained unlinked diagnostic records;
-- lifecycle trace context;
-- safe local n8n execution links only when the workflow/execution route matches the configured loopback editor boundary.
+*The real sub-account Contact carries the two application identities used during reconciliation.*
 
-The Operations API intentionally omits prepared payloads, lease tokens, quota permits, authorization material and unsafe recorded values. Its GET routes are tested to leave durable state unchanged. Recovery actions such as retry/requeue remain controlled operator operations outside this read-only UI.
+![Live HighLevel Opportunity in the HVAC pipeline](docs/assets/readme/04_highlevel_opportunity_new_lead.png)
 
-See [Phase 4 verification](docs/phase-4-verification.md) for the retained evidence.
+*The linked Opportunity appears at New Lead and carries the submission identity used to find it again.*
 
-## AI is a bounded helper
+The sub-account also has a configured native **HVAC Lead Acknowledgement** workflow with a New Lead pipeline-stage trigger and personalized email action. A selective reusable Snapshot contains the three identity fields, pipeline, and workflow, without customer records. The acknowledgement remains Draft/unpublished, so it is configuration rather than a claimed production send. This repository implements PIT authentication, not OAuth. The local `contacted` and `appointment_booked` stages do **not** automatically move the HighLevel Opportunity, and a local booking does not reserve a HighLevel calendar slot. A reliable extension would put desired external state in durable outbox work, supersede stale stage versions, retry and reconcile writes, and handle lost acknowledgements.
 
-NVIDIA NIM is used only for service-context extraction. The n8n request asks for five fields: service type, location, preferred time, urgency and a short summary. Output is constrained to JSON mode, bounded in size, and validated against exact keys, allowed enums and field types.
+## The local follow-up and booking lifecycle
 
-**HTTP 200 is not treated as model success unless the payload passes application validation.**
+An email-capable new Lead gets one pending follow-up; a phone-only Lead does not. A scheduled n8n workflow fetches due items, and FastAPI sends the follow-up through local SMTP before marking it sent and moving the local stage from `new_lead` to `contacted`. The booking workflow accepts a separate `booking_request_id` and an offset-free appointment time in `America/Vancouver` (the Surrey business timezone). FastAPI rejects unsupported or nonexistent local times and stores a timezone-aware instant.
 
-Timeouts, provider errors, malformed JSON, extra fields, unsupported enums or unusable values result in a safe fallback. A valid customer enquiry continues without AI enrichment and can be marked for review.
+An unchanged booking retry reuses its request ID and returns the same appointment. Reusing that ID with different details, or making a second distinct booking for the same Lead, returns a conflict. Booking locks the Lead and FollowUp rows, creates the appointment, moves the local stage to `appointment_booked`, cancels a still-pending follow-up, and writes audit events in one transaction. Follow-up dispatch takes the same lock order: if booking wins, dispatch sees cancellation; if dispatch wins, booking sees the sent state. The database decides that race, not the timing of two n8n canvases.
 
-The model does not decide contact identity, consent, pricing, availability, appointment truth, CRM truth or technician dispatch. Recovery reuses the canonical stored payload instead of rerunning AI and allowing model drift to change an already-admitted business operation.
+![Successful n8n appointment workflow](docs/assets/readme/05_n8n_appointment_booking_success.png)
 
-## Management reporting with Make + Google Sheets
+*Booking saves local state before the workflow asks FastAPI to send a confirmation.*
 
-Reporting is deliberately downstream and non-critical:
+![Booking confirmation in the local Mailpit inbox](docs/assets/readme/06_mailpit_booking_confirmation.png)
 
-\`\`\`text
-PostgreSQL → FastAPI aggregate endpoint → n8n Management Reporting
-           → Make Custom Webhook → Make Data Store routing
-           → Google Sheets Daily Reports → HVAC Management Dashboard
-\`\`\`
+*Mailpit lets the developer inspect the accepted and rendered message, including saved service and time details.*
 
-FastAPI performs the database aggregation and returns an authenticated, sanitized **16-field** management contract. n8n validates the exact field set, report identity, Vancouver business-day window and count reconciliation before sending anything to Make.
+Mailpit is a development SMTP sink. It establishes message generation and local SMTP acceptance, not production delivery or deliverability. The appointment records a requested local time; it reserves neither a technician nor an external calendar. SMTP acceptance and the later database commit of `sent_at` are separate effects, so uncertain email delivery has no universal exactly-once guarantee.
 
-The report contains aggregate counts and service categories, not customer names, email addresses, phone numbers or enquiry text. Individual customer records belong in the application and HighLevel; the Sheets dashboard is intentionally aggregate-only.
+## Why a repeated webhook must not mean a repeated customer effect
 
-The Make scenario uses a stable daily \`report_key\`: the first report for a business date adds a row, while subsequent reports search for and update that same row. Destination inspection caught a real mapping mistake where every Make module was green but the Sheet still contained stale values; the mapping was corrected so the existing row receives values from the fresh webhook payload.
+Transport may deliver the same request twice. The system treats `submission_id` as the business operation, `correlation_id` as its trace, and a fingerprint of normalized customer data as the conflict check. The first admitted job retains the canonical payload, including the accepted AI result. An equivalent replay returns the existing result; the same submission identity with different business data conflicts. Recovery uses the stored payload instead of calling the model again and allowing a later model answer to change work already admitted. A completed job replays from PostgreSQL without another HighLevel call.
 
-![Make management-reporting scenario](docs/assets/readme/09_make_reporting_scenario.png)
+This is **at-least-once retry with reconciled, idempotent business effects**: delivery can repeat, while a confirmed logical request should not create a second logical Contact/Opportunity effect merely because delivery repeated. It is not exactly-once transport. An uncertain remote write is the hard case: a timeout or lost acknowledgement may mean the write committed even though the caller never heard back. Before another create, recovery must determine whether the intended effect already exists.
 
-*Make routes a new daily report to Add Row and an existing report key to Search Rows → Update Row.*
+## Recovery after uncertainty
 
-![HVAC aggregate management dashboard in Google Sheets](docs/assets/readme/10_management_dashboard.png)
+The recovery worker claims one due job at a time with a bounded database lease. Its token identifies the current owner; an expired worker cannot complete or fail a job after another worker reclaims it. Each actual write has a numbered attempt tied to that exact lease. A shared quota permission can defer a worker without consuming an API attempt. The worker first reconciles the stored identity: a verified complete effect finishes without another create; confirmed absence permits a paced write; an ambiguous or broken lookup never counts as absence.
 
-*The dashboard is a management aggregate, not a second customer database.*
+After an attempted write, verified identity and lifecycle fields complete the job. HTTP 429 respects a parseable `Retry-After` minimum; timeouts, network uncertainty, and server errors receive bounded backoff and enter `retry_wait`. Credential or permission failures enter `blocked` and pause new claims for that shared credential. Business conflicts, invalid contracts, unrepresentable retry timing, or exhausted attempts enter `needs_review`. A protected operator requeue can authorize one further attempt after the cause is corrected; it keeps the old attempt and incident history. Jobs, leases, due times, attempts, and incidents survive n8n and backend restarts. The [recovery runbook](docs/phase-3-runbook.md) gives the exact state and requeue rules.
 
-The n8n reporting workflow is currently manual/inactive by design. A Make or Google Sheets failure cannot prevent intake, booking or durable CRM recovery. See [Phase 5 verification](docs/phase-5-verification.md).
+### A controlled failure that left partial success behind
 
-## Workflow inventory
+A scoped synthetic diagnostic prepared **12 durable jobs**, then deliberately bypassed ordinary pacing and recovery. Earlier writes completed, but the local fixed-window CRM fault boundary returned a real HTTP **429** to n8n execution **283**. That execution stayed failed. At that point 10 of 12 synthetic Leads existed and two were missing; the error recorder linked the failed execution to a durable incident. This was controlled fault injection against local test behavior, not a production incident, HighLevel outage, or measurement of HighLevel's vendor rate limit.
 
-| Area | n8n workflow | Responsibility |
-| --- | --- | --- |
-| Intake | \`Lead Intake - Validation, AI Enrichment and CRM Persistence\` | Validate, normalize, enrich, persist and return a truthful intake result |
-| Lifecycle | \`Lifecycle - Appointment Booking and Confirmation\` | Persist a local appointment, transition lifecycle and hand off confirmation |
-| Lifecycle | \`Lifecycle - Dispatch Due Follow-ups\` | Poll due follow-ups, send the development message and record lifecycle state |
-| Recovery | \`CRM Lead Write Recovery Dispatch\` | Claim one job, reconcile identity, obtain quota permission, attempt/settle delivery |
-| Recovery | \`CRM Recovery Failure Recorder\` | Capture safe n8n error context as a durable recovery incident |
-| Diagnostic | \`Controlled CRM Rate-Limit Diagnostic\` | Inactive fault-injection path used only against the controlled local boundary |
-| Reporting | \`Management Reporting - HVAC Snapshot\` | Validate aggregate report contract and send it to Make; manual/inactive |
+![Failed n8n execution 283 after a controlled HTTP 429](docs/assets/readme/07_controlled_429_failure_execution_283.png)
 
-Responsibilities are split so a customer-intake workflow does not also become the retry engine, reporting pipeline and operator console.
+*The intentionally direct diagnostic stops at the HTTP rejection after earlier writes have already committed.*
 
-## Engineering ownership
+Recovery then used the saved jobs and identities to reconcile each item. It marked effects already present as complete and wrote only confirmed missing effects. The worker was restarted during the exercise; the scoped manifest still reached **12/12 Leads, zero missing submission IDs, and zero duplicate submission IDs**. A retained job shows the 429 attempt associated with execution 283 and later successful recovery in execution 294. The failed canvas was not rewritten into a success. The [execution 283 postmortem](docs/phase-3-failed-run-postmortem.md) and [verification trace](docs/phase-3-verification.md) retain the detailed sequence.
 
-| Component | Owns |
-| --- | --- |
-| Website | Request identity, form submission, truthful result display, booking UI and trace access |
-| n8n | Visible orchestration and scheduling |
-| FastAPI / Python | Schemas, domain services, lifecycle APIs, recovery APIs, provider boundary, reporting and safe operations projections |
-| PostgreSQL | Durable application, lifecycle, audit and recovery truth |
-| HighLevel adapter | Vendor-specific Contact/Opportunity mapping, identity checks, projection and reconciliation |
-| HighLevel | Real external CRM representation |
-| Local HighLevel contract simulator | Deterministic contract/fault testing only; never presented as the live CRM |
-| NVIDIA NIM | Optional, schema-validated service-context extraction |
-| Mailpit | Local SMTP acceptance and rendered-message inspection |
-| Make + Google Sheets | Non-critical aggregate management reporting |
-| Docker Compose | Repeatable local service topology |
+![Durable attempt history across failure and recovery](docs/assets/readme/08_durable_recovery_283_to_294.png)
 
-## Verification
+*The attempt history connects the original rejection to a later verified completion without erasing the failed run.*
 
-The deterministic suite currently covers:
+The lesson is concrete: blindly rerunning a partially successful batch can duplicate business effects. Reconciliation asks what exists remotely before authorizing another create. Separate tests exercise 401/403, 429, 500, timeout, malformed success, stale leases, exact attempt ownership, and a lost acknowledgement that reconciles without a second write. The HighLevel contract simulator provides deterministic HTTP behavior for those cases; its local Contacts and Opportunities are test records, never vendor records.
 
-- **165 Python tests**, including the **58-test focused HighLevel adapter subset**;
-- **32 browser/helper tests** across the customer UI, Operations UI and simulator helpers;
-- **45 n8n workflow tests**;
-- Ruff linting, JSON parsing, shell syntax, Docker Compose validation, diff checks and tracked-content secret scanning.
+## An operator can inspect without changing work
 
-The HighLevel subset is included inside the 165 Python tests, not additive.
+`/operations.html` reads the same durable PostgreSQL records through four GET-only endpoints: summary, paged jobs, selected job detail, and paged incidents. An operator can see counts by `pending`, `processing`, `retry_wait`, `completed`, `blocked`, and `needs_review`; filter by state; look up an exact job, submission, or correlation ID; inspect attempts, retry eligibility, linked and unlinked incidents, and local lifecycle context. Observation times make later worker progress visible. An execution reference becomes a link only when both its workflow identity and numeric execution ID justify the installed local n8n editor route.
 
-Beyond deterministic CI, the repository retains separate live/manual evidence for NVIDIA NIM, n8n, Mailpit, Make/Google Sheets and the real HighLevel integration. The CI badge above follows \`main\`; exact historical verification checkpoints are retained in [docs/](docs/) rather than hard-coding a commit that becomes stale on the next documentation change.
+The page has no claim, retry, or requeue control. Its response models omit `payload_json`, lease and quota tokens, credentials, provider bodies, and arbitrary audit metadata; recorded text is screened, and the browser renders dynamic text safely. Both API and browser constrain clickable execution URLs to the exact local editor origin and path. Protected mutation endpoints remain separate. This is a useful local read surface, not a production authentication or monitoring system. The [Operations verification](docs/phase-4-verification.md) includes redaction and GET-purity checks.
 
-The test suite specifically exercises replay/idempotency, PostgreSQL concurrency, booking/follow-up races, stale leases, exact attempt ownership, \`Retry-After\`, credential pauses, lost acknowledgement, identity conflicts, malformed upstream success, DST-aware reporting windows, PII minimization, read-only Operations projections and controlled CRM faults.
+## Reporting is downstream of customer intake
 
-## Scope and boundaries
+FastAPI computes database aggregates for a Vancouver business date; n8n does not connect to PostgreSQL directly. Its separate, manual reporting workflow fetches the authenticated summary, validates an exact **16-field contract**, and sends only that minimized payload to a protected Make webhook. The contract includes report identity and UTC window, Lead totals and service categories, review count, booked appointments, sent follow-ups, and current open recovery incidents. It excludes customer names, contact details, messages, AI summaries, payloads, credentials, and webhook URLs.
 
-This repository uses synthetic test/demonstration data. It is an engineering case study and reference implementation, not a claim that this exact repository handled historical production customer traffic.
+The 16 fields are the version/type and date/window identifiers (`report_version`, `report_type`, `report_key`, `business_date`, `business_timezone`, `window_start_utc`, `window_end_utc`, `generated_at`) plus eight counts (`leads_received`, `furnace_requests`, `air_conditioning_requests`, `other_or_unknown_requests`, `needs_review`, `appointments_booked`, `follow_ups_sent`, `open_recovery_incidents_at_generated_at`). Make's Data Store routes by deterministic `report_key` and adds a new Google Sheets daily row or finds and updates an existing one. A reporting failure cannot undo a committed enquiry or block booking and CRM recovery. The workflow is intentionally inactive/manual; the Make scenario and Sheet configuration are external account state.
 
-The verified boundaries are intentionally explicit:
+![Make reporting route for new and existing daily reports](docs/assets/readme/09_make_reporting_scenario.png)
 
-- real HighLevel evidence covers initial Contact + Opportunity projection and replay reconciliation;
-- automatic later lifecycle-stage synchronization to HighLevel is not implemented;
-- local appointments do not reserve technicians or external/HighLevel calendar slots;
-- the HighLevel acknowledgement workflow is configured but unpublished, and no production HighLevel email send is claimed;
-- Mailpit is development email only;
-- simulator failures are controlled tests, not vendor outage or vendor-rate-limit evidence;
-- the reporting path is aggregate-only, downstream and non-critical;
-- SMTP acceptance and the later database commit are not an atomic distributed transaction;
-- delivery uses at-least-once retry with idempotent business effects and explicit reconciliation rather than a universal exactly-once guarantee.
+*The report key selects the add or existing-row update path after n8n sends aggregate data.*
 
-## Explore the implementation
+![Aggregate HVAC management view in Google Sheets](docs/assets/readme/10_management_dashboard.png)
 
-| Area | Code and evidence |
-| --- | --- |
-| Customer website | [\`frontend/\`](frontend/) |
-| n8n workflows and tests | [\`n8n/\`](n8n/) |
-| FastAPI routes and schemas | [\`backend/app/api/\`](backend/app/api/), [\`backend/app/schemas/\`](backend/app/schemas/) |
-| Persistence models and migrations | [\`backend/app/models/\`](backend/app/models/), [\`backend/migrations/\`](backend/migrations/) |
-| Lifecycle service | [\`backend/app/services/lifecycle_service.py\`](backend/app/services/lifecycle_service.py) |
-| Durable recovery service | [\`backend/app/services/recovery_service.py\`](backend/app/services/recovery_service.py) |
-| Reporting service | [\`backend/app/services/reporting_service.py\`](backend/app/services/reporting_service.py) |
-| HighLevel provider/client | [\`backend/app/providers/highlevel.py\`](backend/app/providers/highlevel.py) |
-| Controlled HighLevel simulator | [\`backend/simulator/\`](backend/simulator/) |
-| Backend tests | [\`backend/tests/\`](backend/tests/) |
-| Verification and self-review | [\`docs/\`](docs/) |
+*The destination is a management aggregate view, not a second customer database.*
 
-## Run locally
+Destination inspection mattered. One green Make execution selected the existing row but mapped its columns from the old Search Rows output, so values stayed stale. The mapping was corrected to take the row number from search and all 16 values from the fresh webhook; a later same-key run updated the existing Sheet row. A 2xx Make webhook response means acceptance, not verified Sheet state. The [reporting verification](docs/phase-5-verification.md) records the contract, mapping correction, and isolated failure test.
 
-For a fresh checkout, copy the safe root [\`.env.example\`](.env.example) to \`.env\`, replace the local placeholder credentials, then run:
+## Verification and system boundaries
 
-\`\`\`bash
-docker compose up --build
-\`\`\`
+The repository's deterministic checks cover API contracts, PostgreSQL persistence and migrations, concurrent booking/follow-up and recovery claims, stale lease and attempt ownership, retry timing and quota behavior, credential pauses, lost acknowledgements, HighLevel foreign/ambiguous identity handling, malformed upstream success, simulator faults, replay conflicts, reporting and daylight-saving-aware date windows, PII minimization, browser response validation, Operations redaction, and n8n Code-node logic. The full local verifier passed **165 Python tests** with disposable PostgreSQL, **32 browser/helper tests**, **45 n8n workflow tests**, and Ruff. The **58 HighLevel adapter tests** are included in the Python total. GitHub Actions runs those suites on push and pull request; live external services are outside that CI gate.
 
-The tracked configuration defaults to the local \`development\` CRM provider. The project also supports an explicitly local \`highlevel_simulator\` mode for deterministic contract/fault tests and an opt-in \`highlevel_live\` mode that requires a protected PIT plus verified resource mappings. Live secrets belong only in protected runtime configuration and must never be committed, logged or placed in screenshots.
+Separately retained manual/live checks cover n8n executions, NVIDIA responses and fallback, Mailpit messages, the real HighLevel initial Contact/Opportunity projection and replay, and Make/Google Sheets destination inspection. Those services are **not** deterministic CI dependencies. This project uses synthetic demonstration and test customer data; it is not a claim of historical production customer traffic. The controlled 429 is a local test, and the published HighLevel scope is initial CRM projection. External Contact/Opportunity IDs are reconciled from stable fields rather than persisted locally; a local follow-up can become due while projection is still retrying. Later HighLevel stage sync, external calendar/technician reservation, production email sending, OAuth, and exactly-once transport are outside the implemented system.
 
-Local interfaces:
+## Explore and run
 
-| Interface | Address |
-| --- | --- |
-| Customer website | \`http://localhost:18000\` |
-| Read-only Operations | \`http://localhost:18000/operations.html\` |
-| n8n | \`http://localhost:5678\` |
-| Mailpit | \`http://localhost:18025\` |
-| Controlled simulator | \`http://localhost:18080\` |
+Start with the [customer UI](frontend/), [seven n8n exports](n8n/), [API routes](backend/app/api/), [HighLevel adapter](backend/app/providers/highlevel.py), [lifecycle service](backend/app/services/lifecycle_service.py), [recovery service](backend/app/services/recovery_service.py), [Operations projection](backend/app/api/operations.py), and [reporting service](backend/app/services/reporting_service.py). The [models](backend/app/models/), [migrations](backend/migrations/), [contract simulator](backend/simulator/), and [tests](backend/tests/) show where those claims are enforced. For a deeper reconstruction, use the [project handover](docs/project-handover.md), [live HighLevel record](docs/phase-6-live-highlevel-verification.md), and [failure postmortem](docs/phase-3-failed-run-postmortem.md).
 
-For the browser walkthrough and retained operational procedures, see the [demo runbook](docs/interview-demo-runbook.md) and [recovery runbook](docs/phase-3-runbook.md).
+For a local checkout, copy [`.env.example`](.env.example) to an ignored `.env`, replace placeholder local secrets, and start the Compose services:
+
+```bash
+docker compose up --build -d
+```
+
+The website and read-only Operations page are at `http://localhost:18000/` and `/operations.html`; Mailpit is at `http://localhost:18025`; the isolated simulator is at `http://localhost:18080`. n8n runs separately: import the sanitized JSON workflows, configure its protected runtime variables for the adapter and optional NVIDIA/Make calls, then activate the customer and recovery workflows you intend to exercise. The default `development` CRM mode needs no vendor token. `highlevel_simulator` is a local contract/fault mode; `highlevel_live` requires a PIT and the provisioned account mappings described in the [live setup record](docs/phase-6-live-highlevel-verification.md). Keep tokens and Make capability URLs outside tracked files.
+
+Run the deterministic browser and workflow suites with `npm run test:browser` and `npm run test:workflow`. The [full verifier](scripts/verify_phase3.sh) uses a disposable PostgreSQL container for the Python concurrency suite and also checks lint, JSON, shell, Compose, and tracked-secret patterns. It does not send live email, call NVIDIA or HighLevel, run n8n, or invoke Make.
