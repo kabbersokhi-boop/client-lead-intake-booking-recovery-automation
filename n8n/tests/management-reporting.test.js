@@ -77,6 +77,7 @@ test("existing customer-critical workflow exports do not reference Make reportin
     "crm-write-diagnostic.json",
     "crm-write-recovery.json",
     "follow-up-dispatch.json",
+    "highlevel-stage-sync.json",
     "lead-intake.json",
   ]);
   for (const fileName of existingExports) {

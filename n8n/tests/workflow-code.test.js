@@ -193,6 +193,9 @@ test("intake acknowledgement accepts only identity-bound queued receipts without
     correlation_id: lead.correlation_id,
   });
   assert.equal(queued.status_code, 202);
+  for (const recovery_state of ["blocked", "needs_review"]) {
+    assert.equal(buildIntakeResult({ ...queued.response_body, recovery_state }).status_code, 202);
+  }
   assert.equal(queued.response_body.crm_lead_id, undefined);
   assert.equal(buildIntakeResult({ ...queued.response_body, correlation_id: "wrong" }).status_code, 502);
   assert.equal(buildIntakeResult({ ...queued.response_body, crm_lead_id: queued.response_body.recovery_job_id }).status_code, 502);

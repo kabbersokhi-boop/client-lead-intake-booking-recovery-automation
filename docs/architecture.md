@@ -13,6 +13,7 @@
 | HighLevel Contract Simulator | Separate loopback-only HTTP service and interview UI. It is local test infrastructure, not HighLevel or a vendor sandbox. |
 | PostgreSQL | Stores lead, follow-up, appointment, source/server timestamp, idempotency, and audit state by correlation ID. |
 | CRM recovery job | Stores the validated payload before delivery, bounded lease, attempt history, safe errors, due time, and final CRM identity independently of a Lead row. |
+| HighLevel stage-sync outbox | One desired managed Opportunity stage per Lead/submission, with monotonic rank/version, lease, due time, and safe attempt history. It is updated in the local lifecycle transaction. |
 | Mailpit | Accepts local development SMTP messages and exposes them on a loopback web UI. It is not an external email provider. |
 | Operations read projection | Exposes allowlisted summaries, paged jobs, job detail, and incidents from the same local PostgreSQL records. It does not invoke recovery actions or external services. |
 
@@ -34,7 +35,7 @@ After a successful submission, the browser displays the returned correlation ID,
 
 ## Lifecycle consistency
 
-Lead creation and initial follow-up scheduling share one transaction. Booking creation, the `appointment_booked` transition, pending-follow-up cancellation, and their audit events share a second transaction. n8n still visibly owns the workflow before and after these operations.
+Lead creation and initial follow-up scheduling share one transaction. Booking creation, the `appointment_booked` transition, pending-follow-up cancellation, desired HighLevel stage advance in configured HighLevel modes, and their audit events share a second transaction. Successful follow-up dispatch also commits `contacted` with the desired stage advance. n8n still visibly owns the workflow before and after these operations.
 
 Both booking and follow-up dispatch lock `Lead` and then reload/lock `FollowUp`, giving the lifecycle decision one consistent ordering. If booking commits first, dispatch observes cancellation and does not send. If dispatch owns the decision first, booking waits, then finishes with `appointment_booked`; concurrent dispatches serialize and send once in normal successful operation.
 
@@ -64,19 +65,27 @@ The safe default remains `DevelopmentCRMProvider` plus the existing lifecycle an
 recovery services. Optional `highlevel_simulator` mode preserves that local persistence and adds a
 separate HighLevel-specific HTTP projection to the local contract simulator. `highlevel_live` is a
 separately credentialed, official-host-pinned Contact/Opportunity projection whose synthetic
-real-sub-account verification is recorded in `docs/phase-6-live-highlevel-verification.md`. No
-live calendar, appointment sync, external email provider, or automatic HighLevel lifecycle-stage
-synchronization is configured.
+real-sub-account verification is recorded in `docs/phase-6-live-highlevel-verification.md`.
+Phase 7 adds managed Opportunity lifecycle stage sync in both HighLevel modes; live calendar,
+appointment reservation, and an external email provider are not configured.
 
 Simulator mode accepts only exact local HTTP hosts with an explicit port and does not use
 environment proxy settings. It cannot be configured with an arbitrary external/vendor URL.
 
-The simulator implements only contact upsert/read/lookup and opportunity search/create/update.
-Automatic lifecycle and appointment synchronization are omitted because they require a durable
-external-sync boundary to preserve the approved booking transaction semantics.
+The simulator implements the Contact and Opportunity subset used by the adapter, including
+Opportunity point reads and stage updates. The new `stage_sync_jobs` row is a transactional
+outbox: local lifecycle commits without HighLevel network work. A scheduled n8n workflow claims
+one due row, and FastAPI reconciles and verifies the exact Opportunity. Desired rank and version
+coalesce forward; a newer version keeps work pending after an older attempt settles. A per-row
+PostgreSQL advisory lock serializes this application's remote writes even across expired leases,
+while booking remains able to advance the desired row during a provider request. Timeout and
+network uncertainty are reconciled before another update. Closed or unmanaged remote state is
+held for review. External HighLevel UI/integration writes are not serialized by the local lock;
+the provider performs a fresh point read before PUT but the API does not provide cross-system
+compare-and-swap semantics. No HighLevel Calendar reservation is implemented.
 
 ## Read-only operations view
 
-`/operations.html` is a local demonstration page over `/api/operations/*`, separate from protected recovery-worker contracts. It reports current durable job-state counts at an explicitly labelled observation time, pages jobs by `created_at DESC, id DESC`, and shows safe attempt/incident history for a selected job. A due time is eligible retry information only for `retry_wait`; it is not evidence of an attempted failure. A completed job may be an ordinary intake rather than a recovery.
+`/operations.html` is a local demonstration page over `/api/operations/*`, separate from protected worker contracts. It reports current durable CRM job-state counts at an explicitly labelled observation time, pages jobs by `created_at DESC, id DESC`, and shows safe attempt/incident history for a selected job. A separate bounded stage-sync projection shows desired stage/version, due state, safe error class, verified remote stage, and attempts without exposing lease tokens or provider bodies. A due time is eligible retry information only for `retry_wait`; it is not evidence of an attempted failure. A completed CRM job may be an ordinary intake rather than a recovery.
 
 Browser projections omit payloads, lease/quota tokens, credentials, provider response bodies, and arbitrary audit metadata. GET handlers issue ordinary reads: they do not lock, claim, expire, retry, resolve, commit, or call n8n, NVIDIA, SMTP, or the CRM write boundary. Numeric execution references may link to the configured loopback n8n editor route; all other values remain text. This is a local synthetic-data boundary, not production authentication or health monitoring.

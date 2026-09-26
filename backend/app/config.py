@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     development_email_from: str = "automation-demo@example.test"
     crm_recovery_max_attempts: int = 4
     crm_recovery_lease_seconds: int = 30
+    stage_sync_lease_seconds: int = 180
     crm_retry_fallback_seconds: int = 10
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

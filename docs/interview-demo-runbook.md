@@ -24,6 +24,7 @@ Keep the retained workflow names unchanged and explain them in three groups:
   **Lifecycle - Appointment Booking and Confirmation**, and
   **Lifecycle - Dispatch Due Follow-ups**.
 - **Reliability / debugging:** **CRM Lead Write Recovery Dispatch**,
+  **HighLevel Opportunity Stage Sync**,
   **CRM Recovery Failure Recorder**, and inactive
   **Controlled CRM Rate-Limit Diagnostic**.
 - **Management reporting:** inactive/manual **Management Reporting - HVAC Snapshot**.
@@ -59,6 +60,23 @@ before a demonstration. Do not rename workflows merely to improve the grouping.
    history, and trace are independently observed durable projections. The two retained open
    unlinked records are historical diagnostic artifacts (`272` and `276`), not current customer
    failures; the linked `283` incident is resolved.
+
+### Phase 7 Opportunity stage path
+
+For the stage-sync demonstration, use a separate fresh synthetic email lead and let its
+scheduled follow-up become due before booking. In HighLevel, show the matching Contact and
+Opportunity at **New Lead** immediately after intake. After the follow-up is sent, open the
+same Opportunity at **Contacted**. Open the **HighLevel Opportunity Stage Sync** execution
+and show its claim and verified result. Then book through the existing website/n8n flow and
+show the same Opportunity at **Appointment Booked**. In the Operations lifecycle-sync section,
+look up the submission ID and show desired version 2 with the Contacted and Appointment Booked
+attempts. Exact intake/booking replay should not create a second Contact or Opportunity or
+move the stage backward. The workflow's dispatch webhook can trigger one due sync for a
+controlled demo; an idle dispatch returns `state: idle`.
+
+The shorter Phase 2 booking-before-follow-up path above is still useful to demonstrate
+follow-up cancellation, but it does not show the intermediate Contacted stage. Neither path
+reserves a HighLevel Calendar slot. The native HighLevel acknowledgement remains Draft.
 
 ## Retained failure and recovery evidence
 
@@ -120,8 +138,9 @@ This is a UI-only optional segment. Do not use Codex or a terminal during the in
    search, and opportunity creation. Expand one event to show sanitized request/response data,
    simulator request ID, submission reference, and allowlisted `Retry-After` without headers or
    credentials.
-4. Use **Appointments** to show the deliberate omission: automatic lifecycle-stage and
-   appointment synchronization are not implemented.
+4. Use **Opportunities / Pipeline** to show managed lifecycle-stage synchronization. Use
+   **Appointments** to show the deliberate omission: HighLevel Calendar reservation is not
+   implemented.
 5. Use **Fault Testing** only as an explanation of capability during the interview. Do not arm a
    fault or reset the simulator while presenting retained evidence.
 
@@ -130,7 +149,8 @@ This is a UI-only optional segment. Do not use Codex or a terminal during the in
 `DevelopmentCRMProvider` remains the authoritative local persistence implementation and safe
 default. The separately verified `highlevel_live` Contact/Opportunity projection is recorded in
 `docs/phase-6-live-highlevel-verification.md`; the simulator demonstration above remains local
-fault/recovery evidence, not live-vendor evidence. Automatic HighLevel lifecycle-stage
-synchronization and appointment/calendar synchronization are not implemented. The synthetic
+fault/recovery evidence, not live-vendor evidence. Managed HighLevel Opportunity stage
+synchronization is implemented and separately live-verified in `docs/phase-7-verification.md`;
+appointment/calendar synchronization is not implemented. The synthetic
 appointment calendar does not reserve external service capacity, and Mailpit does not prove
 production email delivery.

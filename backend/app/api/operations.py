@@ -9,7 +9,14 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import get_db
-from app.models import CRMWriteAttempt, CRMWriteJob, Lead, RecoveryIncident
+from app.models import (
+    CRMWriteAttempt,
+    CRMWriteJob,
+    Lead,
+    RecoveryIncident,
+    StageSyncAttempt,
+    StageSyncJob,
+)
 from app.schemas.operations import (
     CurrentJobCounts,
     IncidentFilter,
@@ -26,6 +33,51 @@ from app.schemas.operations import (
 )
 
 router = APIRouter(prefix="/api/operations", tags=["operations"])
+
+
+@router.get("/stage-sync")
+def operations_stage_sync(
+    submission_id: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Bounded read-only stage state and safe attempt history."""
+    statement = select(StageSyncJob)
+    if submission_id:
+        statement = statement.where(StageSyncJob.submission_id == submission_id)
+    jobs = list(db.scalars(statement.order_by(StageSyncJob.created_at.desc()).limit(25)))
+    attempts = list(db.scalars(
+        select(StageSyncAttempt).where(StageSyncAttempt.job_id.in_([job.id for job in jobs]))
+        .order_by(StageSyncAttempt.attempt_number.desc())
+    )) if jobs else []
+    by_job: dict[uuid.UUID, list[dict]] = {job.id: [] for job in jobs}
+    for attempt in attempts:
+        by_job[attempt.job_id].append({
+            "attempt_number": attempt.attempt_number,
+            "desired_version": attempt.desired_version,
+            "desired_stage": attempt.desired_stage,
+            "started_at": attempt.started_at,
+            "finished_at": attempt.finished_at,
+            "outcome": attempt.outcome,
+            "verified_remote_stage": attempt.verified_remote_stage,
+            "error_class": _safe_recorded_text(attempt.error_class),
+            "status_code": attempt.status_code,
+            "retry_after_seconds": attempt.retry_after_seconds,
+        })
+    return {
+        "observed_at": _observed_at(),
+        "items": [{
+            "submission_id": job.submission_id,
+            "correlation_id": job.correlation_id,
+            "desired_stage": job.desired_stage,
+            "desired_version": job.desired_version,
+            "state": job.state,
+            "due_at": job.due_at,
+            "attempt_count": job.attempt_count,
+            "last_error_class": _safe_recorded_text(job.last_error_class),
+            "verified_remote_stage": job.verified_remote_stage,
+            "attempts": by_job[job.id],
+        } for job in jobs],
+    }
 
 JOB_STATES = (
     "pending",

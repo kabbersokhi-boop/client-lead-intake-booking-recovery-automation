@@ -628,6 +628,80 @@ class HighLevelClient:
                 "HighLevel opportunity stage acknowledgement was malformed.",
             )
 
+    def sync_opportunity_stage(self, lead: Lead, desired_stage: str) -> str:
+        """Reconcile exact application identity and move only within managed stages."""
+        desired_rank = {"new_lead": 0, "contacted": 1, "appointment_booked": 2}[desired_stage]
+        contact = self._lookup_contact(lead)
+        if contact is None:
+            raise HighLevelProviderError(
+                None, "highlevel_contact_missing",
+                "The matching HighLevel Contact is not yet available for stage sync.",
+            )
+        opportunity = self._lookup_opportunity(lead, contact["id"])
+        if opportunity is None:
+            raise HighLevelProviderError(
+                None, "highlevel_opportunity_missing",
+                "The matching HighLevel Opportunity is not yet available for stage sync.",
+            )
+        opportunity_id = opportunity["id"]
+
+        def read_verified() -> dict[str, Any]:
+            body = self._request("GET", f"/opportunities/{opportunity_id}")
+            record = self._record(body, "opportunity")
+            if (
+                record.get("id") != opportunity_id
+                or record.get("locationId") != self.settings.highlevel_location_id
+                or record.get("pipelineId") != self.settings.highlevel_pipeline_id
+                or record.get("contactId") != contact["id"]
+                or self._field_value(
+                    record, self.settings.highlevel_opportunity_submission_field_id
+                ) != str(lead.submission_id)
+            ):
+                raise HighLevelProviderError(
+                    502, "highlevel_malformed_response",
+                    "HighLevel stage verification did not preserve opportunity identity.",
+                )
+            return record
+
+        stage_by_id = {
+            self.settings.highlevel_stage_new_lead_id: ("new_lead", 0),
+            self.settings.highlevel_stage_contacted_id: ("contacted", 1),
+            self.settings.highlevel_stage_appointment_booked_id: ("appointment_booked", 2),
+        }
+        # Search proves uniqueness; a fresh point read narrows the search-to-write window.
+        current_record = read_verified()
+        if current_record.get("status") != "open":
+            raise HighLevelProviderError(
+                409, "highlevel_unmanaged_status",
+                "The HighLevel Opportunity is not open; operator review is required.",
+            )
+        current = stage_by_id.get(current_record.get("pipelineStageId"))
+        if current is None:
+            raise HighLevelProviderError(
+                409, "highlevel_unmanaged_stage",
+                "The HighLevel Opportunity is in an unmanaged stage; operator review is required.",
+            )
+        if current[1] < desired_rank:
+            self.update_opportunity_stage(opportunity_id, desired_stage)
+        verified = read_verified()
+        if verified.get("status") != "open":
+            raise HighLevelProviderError(
+                409, "highlevel_unmanaged_status",
+                "The HighLevel Opportunity is not open; operator review is required.",
+            )
+        verified_stage = stage_by_id.get(verified.get("pipelineStageId"))
+        if verified_stage is None:
+            raise HighLevelProviderError(
+                409, "highlevel_unmanaged_stage",
+                "The HighLevel Opportunity is in an unmanaged stage; operator review is required.",
+            )
+        if verified_stage[1] < desired_rank:
+            raise HighLevelProviderError(
+                None, "highlevel_stage_unverified",
+                "The HighLevel Opportunity did not verify at the desired stage.",
+            )
+        return verified_stage[0]
+
 
 class HighLevelCRMProvider(CRMProvider):
     def __init__(self, settings: Settings, *, client: HighLevelClient | None = None) -> None:

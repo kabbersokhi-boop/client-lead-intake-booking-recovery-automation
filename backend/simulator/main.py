@@ -489,6 +489,15 @@ def update_opportunity(opportunity_id: str, payload: OpportunityUpdate) -> dict[
         return {"opportunity": dict(opportunity)}
 
 
+@app.get("/opportunities/{opportunity_id}")
+def get_opportunity(opportunity_id: str) -> dict[str, Any]:
+    with state.lock:
+        opportunity = state.opportunities.get(opportunity_id)
+        if not opportunity:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+        return {"opportunity": dict(opportunity)}
+
+
 @app.get("/simulator/api/state")
 def simulator_state() -> dict[str, Any]:
     with state.lock:

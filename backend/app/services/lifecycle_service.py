@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Appointment, AuditEvent, FollowUp, Lead
 from app.schemas.lifecycle import BookingCreate
+from app.services.stage_sync_service import StageSyncService
 
 
 class BookingConflictError(Exception):
@@ -213,6 +214,7 @@ class LifecycleService:
         previous_stage = lead.pipeline_stage
         if previous_stage == "new_lead":
             lead.pipeline_stage = "contacted"
+            StageSyncService.advance(db, lead, "contacted")
         db.add_all(
             [
                 AuditEvent(
@@ -304,6 +306,7 @@ class LifecycleService:
         )
         previous_stage = lead.pipeline_stage
         lead.pipeline_stage = "appointment_booked"
+        StageSyncService.advance(db, lead, "appointment_booked")
         now = datetime.now(timezone.utc)
         events = [
             AuditEvent(

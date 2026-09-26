@@ -6,7 +6,13 @@ Future phases must update this document before their final commit so the reposit
 
 ## Current checkpoint
 
-- Review date: 2026-09-23.
+- Phase 7 lifecycle stage sync is implemented and live-verified for one fresh synthetic
+  n8n intake → scheduled follow-up → booking sequence. The same HighLevel Opportunity moved
+  New Lead → Contacted → Appointment Booked; exact intake and booking replays created no second
+  Contact, Opportunity, or Appointment. See `docs/phase-7-verification.md`,
+  `docs/phase-7-self-review.md`, and `docs/phase-7-runbook.md`. Final commit SHA and exact-SHA
+  CI are recorded in the completion report; older checkpoint figures below remain historical.
+- Review date: 2026-09-27.
 - Presentation checkpoint: the current README and curated visual case study are being prepared
   from starting SHA `b1095f08d8cd34708def90f0878024663b17b9fa`. The README includes ten primary
   screenshots and two supporting HighLevel configuration screenshots under `docs/assets/readme/`;
@@ -159,14 +165,17 @@ verified CRM completion. It does not provide an arbitrary dismiss action. Theref
 
 - **Browser UI:** synthetic intake, booking, trace, and read-only Operations views.
 - **FastAPI application:** validation, durable domain state, development CRM boundary, lifecycle and booking services, email boundary, recovery control APIs, and operations projections.
-- **PostgreSQL:** authoritative application, lifecycle, recovery-job, attempt, and incident records.
-- **n8n:** customer-critical intake orchestration, booking orchestration, follow-up scheduling, error recording, and CRM-write recovery dispatch.
+- **PostgreSQL:** authoritative application, lifecycle, recovery-job, stage-sync desired state,
+  attempt, and incident records.
+- **n8n:** customer-critical intake orchestration, booking orchestration, follow-up scheduling,
+  error recording, CRM-write recovery, and HighLevel stage-sync dispatch.
 - **NVIDIA NIM:** optional structured enrichment with safe fallback; it is not allowed to decide whether a valid lead is preserved.
 - **Mailpit:** local development SMTP capture, not a production email provider.
 - **Development CRM adapter:** explicit local stand-in, never GoHighLevel.
 - **HighLevel adapter:** optional HTTP projection that composes the development persistence path;
   it supports the retained `highlevel_simulator` fault harness and the separately verified
-  PIT-authenticated `highlevel_live` Contact/Opportunity projection, but does not own retries.
+  PIT-authenticated `highlevel_live` Contact/Opportunity projection and managed lifecycle stage
+  reconciliation. PostgreSQL owns retry state; the provider validates identity and remote effect.
 - **HighLevel Contract Simulator:** separate isolated test service at `http://localhost:18080`;
   it implements only the used contact/opportunity subset and is not HighLevel or a vendor sandbox.
 - **Make:** downstream management routing only. The private Custom Webhook, Data Store branch,
@@ -177,7 +186,7 @@ Preserve the separation that n8n owns customer-critical intake, booking, and rec
 
 ### Current project workflow states
 
-The preserved n8n runtime also contains unrelated workflows. The seven workflows owned by this
+The preserved n8n runtime also contains unrelated workflows. The eight workflows owned by this
 project are grouped below; preserve their IDs and names because retained execution evidence refers
 to them.
 
@@ -188,6 +197,7 @@ to them.
 - `phase2-follow-up-dispatch` — `Lifecycle - Dispatch Due Follow-ups`
 - `phase3-crm-write-recovery` — `CRM Lead Write Recovery Dispatch`
 - `phase3-crm-recovery-error` — `CRM Recovery Failure Recorder`
+- `phase7-highlevel-stage-sync` — `HighLevel Opportunity Stage Sync`
 
 **Intentionally inactive/manual workflows**
 
@@ -265,9 +275,9 @@ rejected, and proxy environment settings are ignored. Live mode has separate cre
 cannot be pointed at an arbitrary host.
 
 Current official docs expose appointment create/read under `Version: v3`, correcting the earlier
-old-version rationale. Appointment and automatic stage sync remain omitted because no live
-calendar mapping or durable post-booking lifecycle-sync ownership has been verified; Phase 2
-booking was not weakened by an external call. Exact contact lookup remains officially OAuth-only,
+old-version rationale. HighLevel Calendar reservation remains omitted. Phase 7 added durable
+post-booking Opportunity stage sync without moving the provider call into the booking
+transaction. Exact contact lookup remains officially OAuth-only,
 so the verified Private Integration Token reconciliation path uses bounded location contact
 listing, strict local identifier comparison, and stable identity custom fields instead.
 
@@ -311,7 +321,7 @@ recovery role. Never present the simulator as a HighLevel sandbox or as live-ven
 The separate `docs/phase-6-live-highlevel-verification.md` record now supports the verified live
 Contact/Opportunity claim.
 
-## Phase 7 — presentation hardening and case-study packaging
+## Historical Phase 7A — presentation hardening and case-study packaging
 
 Phase 7A improves only presentation clarity. It preserves the approved architecture, retained
 execution history, recovery truth model, and read-only Operations surface. The deterministic
@@ -326,8 +336,9 @@ Make `1614`/`1627`/`1654` debugging story.
 HighLevel live Contact/Opportunity projection is verified with synthetic data through one
 website/n8n/FastAPI/PostgreSQL/live-HighLevel intake and an exact replay with no additional logical
 CRM effect. `DevelopmentCRMProvider` remains the distinct safe-default local Lead/follow-up/audit
-persistence implementation. The retained simulator remains the deterministic local fault harness;
-automatic HighLevel lifecycle-stage and appointment/calendar synchronization are not wired.
+persistence implementation. The retained simulator remains the deterministic local fault harness.
+Phase 7 subsequently added automatic managed Opportunity stage synchronization; appointment/
+calendar reservation remains unwired.
 
 The README case study and curated screenshot set are the current Phase 7B deliverable. The
 repository includes ten primary story images and two supporting HighLevel configuration images;
@@ -388,7 +399,8 @@ claim to complete the timed rehearsal, interview Q&A package, or final PDF.
 
 The 2026-09-23 README now follows the verified customer journey, explains the durable recovery
 boundary and controlled execution `283` failure, presents the live HighLevel and Make/Sheets
-evidence, lists all seven project workflows, and states the lifecycle/calendar/email limits.
+evidence, listed the seven project workflows present at that checkpoint, and stated the then-current
+lifecycle/calendar/email limits. Phase 7 adds the eighth workflow and stage-sync evidence.
 Before release, validate all relative image links and binary content, run the established verifier,
 scan tracked content for secrets, inspect the final diff, then push and confirm CI on the exact
 published SHA.
@@ -416,8 +428,11 @@ The final rehearsal should use a fresh synthetic lead for the normal journey whi
 4. Book before the follow-up becomes due.
 5. Show the follow-up cancellation and the appointment/booking confirmation captured in Mailpit.
 6. Open Operations, refresh manually, locate the job by a durable identifier, inspect attempts/incidents, and follow safe trace/execution links.
-7. Use retained diagnostic and recovery executions for failure teaching rather than recreating them.
-8. Show Make only to its recorded live verification extent; show the HighLevel Contract Simulator
+7. For the Phase 7 lifecycle story, let a fresh email follow-up become due, show the same
+   HighLevel Opportunity at Contacted, then book through n8n and show the same Opportunity at
+   Appointment Booked. In Operations, inspect the desired version and two verified attempts.
+8. Use retained diagnostic and recovery executions for failure teaching rather than recreating them.
+9. Show Make only to its recorded live verification extent; show the HighLevel Contract Simulator
    only as local contract-test evidence, never as a live vendor account.
 
 The visual case study must continue to preserve these distinct evidence stories: the Phase 1

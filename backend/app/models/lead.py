@@ -138,6 +138,53 @@ class CRMWriteAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class StageSyncJob(Base):
+    __tablename__ = "stage_sync_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    lead_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("leads.id"), unique=True, nullable=False)
+    submission_id: Mapped[uuid.UUID] = mapped_column(unique=True, nullable=False, index=True)
+    correlation_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    desired_stage: Mapped[str] = mapped_column(String(40), nullable=False)
+    desired_rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    desired_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    state: Mapped[str] = mapped_column(String(30), nullable=False, default="pending", index=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    generation_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lease_token: Mapped[uuid.UUID | None] = mapped_column(index=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(160))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    verified_remote_stage: Mapped[str | None] = mapped_column(String(40))
+    last_error_class: Mapped[str | None] = mapped_column(String(80))
+    last_error_message: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class StageSyncAttempt(Base):
+    __tablename__ = "stage_sync_attempts"
+    __table_args__ = (UniqueConstraint("job_id", "attempt_number"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("stage_sync_jobs.id"), nullable=False, index=True
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    desired_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    desired_stage: Mapped[str] = mapped_column(String(40), nullable=False)
+    lease_token: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outcome: Mapped[str] = mapped_column(String(40), nullable=False, default="started")
+    verified_remote_stage: Mapped[str | None] = mapped_column(String(40))
+    error_class: Mapped[str | None] = mapped_column(String(80))
+    status_code: Mapped[int | None] = mapped_column(Integer)
+    retry_after_seconds: Mapped[int | None] = mapped_column(Integer)
+
+
 class RecoveryIncident(Base):
     __tablename__ = "recovery_incidents"
 

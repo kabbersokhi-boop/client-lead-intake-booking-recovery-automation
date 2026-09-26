@@ -226,6 +226,11 @@ class ContractBackend:
             opportunity = self.opportunities[request.url.path.rsplit("/", 1)[-1]]
             opportunity.update(json.loads(request.content))
             return httpx.Response(200, json={"opportunity": opportunity})
+        if request.method == "GET" and request.url.path.startswith("/opportunities/"):
+            opportunity = self.opportunities.get(request.url.path.rsplit("/", 1)[-1])
+            if opportunity:
+                return httpx.Response(200, json={"opportunity": opportunity})
+            return httpx.Response(404)
         raise AssertionError(f"unexpected request: {request.method} {request.url}")
 
 

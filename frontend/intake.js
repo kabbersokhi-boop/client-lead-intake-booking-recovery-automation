@@ -144,7 +144,7 @@
         body.state === "received" &&
         body.intake_state === "queued" &&
         UUID_RE.test(body.recovery_job_id || "") &&
-        ["pending", "retry_wait", "processing"].includes(body.recovery_state) &&
+        ["pending", "retry_wait", "processing", "blocked", "needs_review"].includes(body.recovery_state) &&
         body.submission_id === payload.submission_id &&
         body.correlation_id === payload.correlation_id &&
         body.crm_lead_id === undefined,

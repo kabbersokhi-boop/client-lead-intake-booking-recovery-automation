@@ -7,9 +7,11 @@ from app.models.lead import (
     FollowUp,
     Lead,
     RecoveryIncident,
+    StageSyncAttempt,
+    StageSyncJob,
 )
 
 __all__ = [
     "Appointment", "AuditEvent", "CRMFaultRun", "CRMWriteAttempt", "CRMWriteJob",
-    "FollowUp", "Lead", "RecoveryIncident",
+    "FollowUp", "Lead", "RecoveryIncident", "StageSyncAttempt", "StageSyncJob",
 ]

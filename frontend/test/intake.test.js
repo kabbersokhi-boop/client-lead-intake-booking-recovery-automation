@@ -130,6 +130,9 @@ test("queued intake preserves identity without fabricating a CRM lead or enablin
   assert.equal(verifiedSuccess(queued, payload), false);
   assert.equal(verifiedQueued({ ...queued, crm_lead_id: queued.recovery_job_id }, payload), false);
   assert.equal(beginIntakeAttempt().bookingPanelVisible, false);
+  for (const recovery_state of ["blocked", "needs_review"]) {
+    assert.equal(verifiedQueued({ ...queued, recovery_state }, payload), true);
+  }
 });
 
 test("pending trace is distinct from an old successful CRM card", () => {

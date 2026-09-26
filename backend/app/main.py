@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.operations import router as operations_router
 from app.api.reporting import router as reporting_router
 from app.api.routes import router
+from app.api.stage_sync import router as stage_sync_router
 from app.config import settings
 
 app = FastAPI(title="Development CRM Adapter", version="0.1.0")
@@ -17,6 +18,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router)
+app.include_router(stage_sync_router)
 app.include_router(operations_router)
 app.include_router(reporting_router)
 
