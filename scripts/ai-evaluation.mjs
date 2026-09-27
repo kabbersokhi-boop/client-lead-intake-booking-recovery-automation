@@ -169,7 +169,7 @@ function validateProviderPayload(responsePayload, contract, syntheticMessage) {
   }
 }
 
-function summarize(records) {
+function summarize(records, categories = []) {
   const attempted = records.length;
   const returned = records.filter((record) => record.http_status >= 200 && record.http_status < 300);
   const usable = records.filter((record) => record.outcome === 'usable_output');
@@ -191,7 +191,7 @@ function summarize(records) {
     outcomes: Object.fromEntries(['usable_output', 'invalid_output', 'timeout', 'provider_failure'].map((name) => [name, records.filter((record) => record.outcome === name).length])),
     fields: fieldStats,
     summary_review_required: usable.length,
-    category: Object.fromEntries([...new Set(records.map((record) => record.category))].sort().map((category) => {
+    category: Object.fromEntries([...new Set([...categories, ...records.map((record) => record.category)])].sort().map((category) => {
       const selected = records.filter((record) => record.category === category);
       const selectedUsable = selected.filter((record) => record.outcome === 'usable_output');
       const n = selected.length;
@@ -205,8 +205,22 @@ function pct(numerator, denominator) {
   return denominator ? `${(100 * numerator / denominator).toFixed(1)}% (${numerator}/${denominator})` : `n/a (0/${denominator})`;
 }
 
-function reportSection(title, records) {
-  const m = summarize(records);
+function usageAndLatency(records) {
+  const usage = records.map((record) => record.token_usage).filter((value) => value && Number.isFinite(value.total_tokens));
+  const latencies = records.map((record) => record.latency_ms).filter(Number.isFinite).sort((a, b) => a - b);
+  const median = latencies.length ? latencies[Math.floor(latencies.length / 2)] : null;
+  return {
+    responses_with_usage: usage.length,
+    prompt_tokens: usage.reduce((sum, value) => sum + (value.prompt_tokens ?? 0), 0),
+    completion_tokens: usage.reduce((sum, value) => sum + (value.completion_tokens ?? 0), 0),
+    total_tokens: usage.reduce((sum, value) => sum + (value.total_tokens ?? 0), 0),
+    median_latency_ms: median
+  };
+}
+
+function reportSection(title, records, categories) {
+  const m = summarize(records, categories);
+  const usage = usageAndLatency(records);
   const lines = [
     `### ${title}`,
     '',
@@ -215,6 +229,7 @@ function reportSection(title, records) {
     `- Automatic semantic correctness (all four auto-graded fields and no detected prohibited claim / usable): ${pct(m.semantic_correct, m.semantic_denominator)}`,
     `- Overall success (automatic semantic successes / all attempted): ${pct(m.overall_success, m.overall_denominator)}`,
     `- Outcomes: usable ${m.outcomes.usable_output}, invalid ${m.outcomes.invalid_output}, timeout ${m.outcomes.timeout}, provider failure ${m.outcomes.provider_failure} (n=${m.attempted})`,
+    `- Returned token usage: ${usage.responses_with_usage}/${m.attempted} attempts; prompt ${usage.prompt_tokens}, completion ${usage.completion_tokens}, total ${usage.total_tokens}. Median latency: ${usage.median_latency_ms === null ? 'n/a' : `${usage.median_latency_ms} ms`} across ${m.attempted} attempts.`,
     `- Summary semantic review required: ${m.summary_review_required}/${m.schema_valid} usable outputs; not included in automatic semantic accuracy.`,
     '',
     '| Field | Correct among usable |',
@@ -443,25 +458,28 @@ function generateReport() {
     `Rubric: ${rubric.version}, SHA-256 \`${sha256(read(RUBRIC_PATH))}\`.`,
     `Exported system prompt SHA-256: \`${contract.promptHash}\`; extraction request/validator contract SHA-256: \`${contract.contractHash}\`.`,
     `Model: ${runs[0]?.header.model_id ?? 'not run (no configured provider key/model available)'}. Provider: NVIDIA NIM OpenAI-compatible chat completions.`,
+    `Run identifiers: ${runs.map((run) => run.header.run_id).join(', ') || 'no run artifacts'}. Held-out run: ${held ? held.header.run_id : 'not run'}.`,
     `Exported request settings: temperature=${contract.settings.temperature}, max_tokens=${contract.settings.max_tokens}, reasoning_effort=${contract.settings.reasoning_effort}, response_format=${contract.settings.response_format.type}, timeout=${contract.settings.timeout_ms} ms; sequential concurrency=1.`,
     `Provider requests made: ${rows.filter((record) => record.request_attempted).length}; retries: 0; candidate prompt: none.`,
     `Cost: unavailable (no applicable verified rate recorded).`, '',
     ...(runs.length === 0 ? ['Live provider blocker: `.env` has placeholder model/key values, the current shell has no NVIDIA variables, and the local Docker daemon was inaccessible. No NVIDIA inference-specific connected tool was available. The CLI stopped before sending an HTTP request; historical diagnostics were not treated as current access.', ''] : []),
     'The measured semantic score covers only exact service/urgency and conservative location/time grading plus a narrow deterministic prohibited-claim guard. Every summary requires human review and is excluded from automatic semantic-accuracy claims. Provider/schema failures remain in attempted-case denominators.', '',
-    reportSection('Development baseline (selection split)', dev?.records ?? []),
-    reportSection('Held-out baseline (evaluation split)', held?.records ?? []),
+    reportSection('Development baseline (selection split)', dev?.records ?? [], Object.keys(categoryCounts)),
+    reportSection('Held-out baseline (evaluation split)', held?.records ?? [], Object.keys(categoryCounts)),
     '## Representative failures', ''
   ];
   const failures = rows.filter((record) => record.outcome !== 'usable_output' || !record.grading.automatic_semantic_correct).slice(0, 8);
   if (!failures.length) lines.push('No retained provider responses to inspect yet.');
   else for (const item of failures) {
     const source = dataset.cases.find((candidate) => candidate.id === item.case_id);
-    lines.push(`- **${item.case_id} (${item.outcome})**: ${source?.rationale ?? 'synthetic case'}. Expected ${JSON.stringify(source?.expected)}; extracted ${JSON.stringify(item.extracted)}; field results ${JSON.stringify(item.grading.field_results)}${item.error_class ? `; safe error class \`${item.error_class}\`` : ''}.`);
+    lines.push(`- **${item.case_id} (${item.outcome})**: ${(source?.rationale ?? 'synthetic case').replace(/[.\s]+$/, '')}; expected ${JSON.stringify(source?.expected)}; extracted ${JSON.stringify(item.extracted)}; field results ${JSON.stringify(item.grading.field_results)}${item.error_class ? `; safe error class \`${item.error_class}\`` : ''}.`);
   }
   lines.push('', '## Dataset and label limitations', '',
     'All examples are hand-authored synthetic enquiries. Labels encode the explicit v1 rubric and are not independent human ground truth; there was an independent AI-assisted rubric review, not a human validation study. The urgency convention is only for repeatable portfolio evaluation and is not a clinical or professionally validated safety policy. Location/time normalization intentionally avoids guessing aliases, relative dates, or time zones.', '',
+    'Scoring caveat from development case S004: the input explicitly says “Richmond office,” while the canonical location label is “Richmond.” The extracted location preserves that source-supported specificity, but the conservative exact normalized matcher marks it incorrect. The label was not changed after evaluation; this is a known automatic-scoring false-negative risk and needs operator review.', '',
     'Category counts (development / held out): ' + Object.entries(categoryCounts).map(([category, counts]) => `${category} ${counts.development}/${counts.held_out}`).join('; ') + '.', '',
     '## Limitations and next step', '',
+    'No candidate prompt was created or selected: only 13/40 development cases were attempted and just 6 usable outputs remain, which is too little evidence to distinguish a repeatable prompt defect from sampling noise. The 20 held-out cases were not sent.', '',
     'No production accuracy, customer ROI, or human validation is claimed. The narrow automatic claim guard can miss unsupported prose; the review-marked summaries must be checked by an operator. Milestone 2B should add an audited operator review/correction workflow that captures original model output, accepted corrections, reviewer identity/time, and a versioned reason without allowing model output to confirm bookings or invent facts.', '',
     'Reproduction commands: `node scripts/ai-evaluation.mjs validate`; `npm run test:evaluation`; `bash scripts/ai-evaluation-via-n8n.sh run --split development --run-id baseline-development`; after development selection, `bash scripts/ai-evaluation-via-n8n.sh run --split held_out --run-id baseline-held-out`; then `node scripts/ai-evaluation.mjs report`.', ''
   );
