@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   acquireLock, assertRequestBudget, deriveStats, eventContext, formatReport, gradeCase,
-  budgetedAttempt, loadDataset, makeManifest, manifestHash, oneAttempt, parseAndValidateLedger, pendingCases,
+  budgetedAttempt, initialCircuitStreak, loadDataset, makeManifest, manifestHash, oneAttempt, parseAndValidateLedger, pendingCases,
   stableJson
 } from '../../scripts/ai-evaluation-v2.mjs';
 import { readContract } from '../../scripts/ai-evaluation.mjs';
@@ -167,6 +167,14 @@ test('global request cap includes uncertain reservations and refuses the next re
   assert.doesNotThrow(() => assertRequestBudget(149));
   assert.throws(() => assertRequestBudget(150), /budget of 150/);
   assert.throws(() => assertRequestBudget(13 + 137), /budget of 150/);
+});
+
+test('a diagnosed circuit reset permits only new attempts and does not erase an untripped failure streak', () => {
+  const threeTimeouts = Array.from({ length: 3 }, () => ({ outcome: 'timeout' }));
+  assert.throws(() => initialCircuitStreak(threeTimeouts), /Circuit breaker is open/);
+  assert.equal(initialCircuitStreak(threeTimeouts, true), 0);
+  assert.equal(initialCircuitStreak(threeTimeouts.slice(0, 2), true), 2);
+  assert.equal(initialCircuitStreak([...threeTimeouts, { outcome: 'usable_output' }, { outcome: 'timeout' }]), 1);
 });
 
 test('budget check occurs before a fake transport and cannot reserve the 151st milestone request', async () => {

@@ -290,6 +290,19 @@ function assertRequestBudget(used, cap = 150) {
   if (!Number.isSafeInteger(used) || used < 0 || used >= cap) throw new Error(`Global milestone provider-request budget of ${cap} reservations is exhausted.`);
 }
 
+function initialCircuitStreak(settlements, acknowledgeReset = false) {
+  let streak = 0;
+  for (const prior of settlements.slice(-3)) {
+    if (prior.outcome === 'provider_failure' || prior.outcome === 'timeout') streak += 1;
+    else streak = 0;
+  }
+  if (streak >= 3) {
+    if (acknowledgeReset) return 0;
+    throw new Error('Circuit breaker is open after three consecutive timeout/provider failures. Diagnose service, then invoke with --ack-circuit-reset to resume only unreserved cases.');
+  }
+  return streak;
+}
+
 async function budgetedAttempt({ used, cap = 150, ...attempt }) {
   assertRequestBudget(used, cap);
   return oneAttempt(attempt);
@@ -545,14 +558,8 @@ async function runLive(split, runId) {
     }
     const reserved = new Set(validated.attempts.map((a) => a.reservation.case_id));
     const pending = data.dataset.cases.filter((item) => item.split === split && !reserved.has(item.id));
-    let consecutiveServiceFailures = 0;
     const settlements = validated.attempts.map((a) => a.settlement).filter(Boolean);
-    for (const prior of settlements.slice(-3)) {
-      if (prior.outcome === 'provider_failure' || prior.outcome === 'timeout') consecutiveServiceFailures += 1;
-      else consecutiveServiceFailures = 0;
-    }
-    if (consecutiveServiceFailures >= 3) throw new Error('Circuit breaker is open after three consecutive timeout/provider failures. Diagnose service, then invoke with --ack-circuit-reset to resume only unreserved cases.');
-    if (process.argv.includes('--ack-circuit-reset')) consecutiveServiceFailures = 0;
+    let consecutiveServiceFailures = initialCircuitStreak(settlements, process.argv.includes('--ack-circuit-reset'));
     for (const item of pending) {
       const outcome = await budgetedAttempt({ used: loadRequestBudget(), file, manifest, runId, split, item, key: config.key, endpoint: config.endpoint, timeout: config.timeout, contract });
       process.stdout.write(`${item.id}: ${outcome.outcome}\n`);
@@ -599,7 +606,7 @@ function reportCommand() {
 }
 
 export {
-  acquireLock, assertRequestBudget, budgetedAttempt, deriveStats, endpointIdentity, eventContext, formatReport, gradeCase,
+  acquireLock, assertRequestBudget, budgetedAttempt, deriveStats, endpointIdentity, eventContext, formatReport, gradeCase, initialCircuitStreak,
   loadDataset, makeManifest, manifestHash, oneAttempt, parseAndValidateLedger,
   pendingCases, responseRecord, stableJson, validateRecordsForReport
 };
