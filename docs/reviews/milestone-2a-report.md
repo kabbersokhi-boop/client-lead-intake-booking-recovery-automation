@@ -2,15 +2,15 @@
 
 ## Correction pass (2026-09-28)
 
-**Status: partial.** The compatibility, durability, scoring-integrity, and reporting corrections are implemented and committed. The real-provider v2 baseline is resumable but incomplete: the explicit circuit breaker stopped after three consecutive 18-second timeouts. Development is 3/40 settled; held-out is gated and has 0/20 requests. Do not interpret this as a completed evaluation.
+**Status: partial.** The compatibility, durability, scoring-integrity, and reporting corrections are implemented and committed. The real-provider v2 baseline is resumable but incomplete: two bounded invocation segments each stopped at the explicit circuit breaker after three consecutive 18-second timeouts. Development is 6/40 settled; held-out is gated and has 0/20 requests. Do not interpret this as a completed evaluation.
 
 Branch: `milestone-2a-ai-evaluation`
 
 Milestone 1 baseline: `6473e37131cb9cc948b859b35dc6689e3a65d796`
 
-Final implementation SHA: `47437ee4b4e4e3a5edadb1a3ae5a917827e23dd1`
+Final implementation SHA: `14e8d28729f5e4c2fb2d57fd6e69a17272588c92`
 
-Implementation commits: `11bcfb22ae7b8e04836800459e0d98f546089cdc` (protocol, harness, and retained partial run), `4af56055fcfb218c31d307282c6e4096ca88002a` (retained-output/grade consistency), `56d8c02a6be5af9c9e043b1d8db2ec9425d164a2` (fail-closed stale-lock handling), and `47437ee4b4e4e3a5edadb1a3ae5a917827e23dd1` (README links to both result versions).
+Implementation commits: `11bcfb22ae7b8e04836800459e0d98f546089cdc` (protocol, harness, and retained partial run), `4af56055fcfb218c31d307282c6e4096ca88002a` (retained-output/grade consistency), `56d8c02a6be5af9c9e043b1d8db2ec9425d164a2` (fail-closed stale-lock handling), `47437ee4b4e4e3a5edadb1a3ae5a917827e23dd1` (README links), and `14e8d28729f5e4c2fb2d57fd6e69a17272588c92` (tested circuit reset and second retained invocation).
 
 The original v1 dataset, rubric, 13 provider observations, and published v1 results remain unchanged. Their file hashes are still dataset `695e9bbc9b541ae072731f5aa7f18ff4651632168de77677855a89375594a9d9`, rubric `7c2f201908448a4624792be44870ff945833eae0551edf909defaeefd6933cf5`, 13-call ledger `238d5fdf36f43ce6771c1a55f35b2fed65b5e9b4bdcd64fd8599d73128ca2f69`, and published results `decb0fce8f2c19a5a3f449d6d78222e4bbd1fb8fbfb451d58394f1fa4d8533e2`. [The v1 results](milestone-2a-results.md) remain the historical report; they are not silently replaced by revised scores.
 
@@ -26,20 +26,22 @@ The original v1 dataset, rubric, 13 provider observations, and published v1 resu
 
 4. **Reproducible reporting.** V2 report generation validates the manifests and all records before deriving coverage, outcome counts, denominators, categories, field scores, and usage. Empty, partial, complete-development, malformed, and mixed-configuration artifacts are covered. Unknown reservations remain in attempted totals; missing token usage is explicitly unavailable. A populated all-pass fixture is not described as having no responses to inspect. The v1 published report was not regenerated.
 
+5. **Circuit reset.** A resumed invocation with `--ack-circuit-reset` initially exited before sending because the open-circuit check ran before the acknowledgement was applied. The ledger stayed at three settled requests. The runner now applies acknowledgement only to an already tripped three-failure streak; it preserves shorter failure streaks. A focused offline test covers both paths. The subsequent invocation resumed at S004 and made exactly three new requests before the breaker reopened.
+
 ### Frozen v2 data and live baseline
 
 The effective v2 dataset is 60 synthetic cases, 40 development and 20 held-out, composed from the unchanged v1 base plus the frozen two-label overlay. Its effective canonical SHA-256 is `d6780d5a945bf097cfe8dde076a30a7d6973308f7ab483234f54310e5a57b61b`; overlay SHA-256 is `fab3833ea2021e88c0ef3ed811399bf1a26d6f571b28cc9dc8b05e92a2977150`; rubric-v2 SHA-256 is `fb5e5fcc8743c7f0d0b0b73276f16a0af4132f6eeddfb9f1d55088dbc5b276cd`. Categories remain straightforward 8/0, missing/paraphrase 8/5, ambiguity/conflict 8/6, urgency policy 8/5, and unsupported/adversarial 8/4 (development/held-out). These are hand-authored synthetic cases, not customer records. The labels received bounded AI-assisted review, not independent human validation.
 
 The actual exported production prompt and contract were used without modification: prompt hash `c95a8c1fbf4eae6ada2378d8e5ae7b23eef30f54fefccf1b3e2ceb688ba1b417`, request/validator hash `dddab8c7381379484225199bb868976ce599f0488c1cea1b8cccdbaf2dfbf5b7`. Provider is NVIDIA NIM, model `openai/gpt-oss-20b`, temperature 0, max tokens 180, reasoning effort low, JSON-object response, timeout 18,000 ms, concurrency 1, no retries. Experiment ID: `50a029bdd95e42e753fd8a3be2af17f07ebb21d4c3eeb70611a55674ea37d321`; run ID: `baseline-v2-development`.
 
-Three v2 requests were reserved and settled: S001, S002, and S003 all timed out (18,032 ms, 18,005 ms, and 18,008 ms), with no HTTP response or token usage. Thus availability is 0/3; schema validity and semantic correctness are unavailable (0 HTTP 2xx and 0 usable responses); overall success is 0/3. There are 0 unknown outcomes. Cost is unavailable. The circuit breaker opened after the third consecutive provider timeout. Credential-free DNS/TLS diagnostics connected successfully with authorized TLS 1.3; this does not explain inference latency and is not provider availability evidence. No auth/configuration error was observed. The retained [v2 ledger](ai-evaluation-runs/baseline-v2-development.jsonl) and [generated v2 results](milestone-2a-results-v2.md) contain the reproducible evidence.
+Six v2 requests were reserved and settled in two invocation segments. Original S001–S003 timed out at 18,032, 18,005, and 18,008 ms. Resumed S004–S006 timed out at 18,021, 18,006, and 18,007 ms. Each segment stopped at its third consecutive timeout. Every attempt has a null HTTP status and unavailable token usage; availability is 0/6, schema validity and semantic correctness are unavailable (0 HTTP 2xx and 0 usable responses), and overall success is 0/6. There are 0 unknown outcomes. Cost is unavailable. Credential-free DNS/TLS diagnostics connected successfully with authorized TLS 1.3; this does not explain inference latency and is not provider availability evidence. No auth/configuration error was observed. The retained [v2 ledger](ai-evaluation-runs/baseline-v2-development.jsonl) has SHA-256 `4cbfd37213358e8d14811c000cff11f35b74fcfb935ad4aac81fc5d56340f7d0`; the [generated v2 results](milestone-2a-results-v2.md) show all denominators.
 
-The milestone-wide count is 16 actual provider requests (the preserved 13 v1 observations plus these 3 v2 requests), with no uncertain reservations; 134 of the 150-call budget remain. The remaining 37 development cases were not sent after the breaker opened; all 20 held-out cases remain unattempted. Held-out work must wait for every development case to have a settled outcome. Do not use `--ack-circuit-reset` without first diagnosing a transient service problem; if used, it applies only to unreserved cases and never retries timed-out IDs. No candidate prompt was created. The deterministic guided-demo stub was not used as evidence.
+The milestone-wide count is 19 actual provider requests (the preserved 13 v1 observations plus these 6 v2 requests), with no uncertain reservations; 131 of the 150-call budget remain. The remaining 34 development cases were not sent after the breaker reopened; all 20 held-out cases remain unattempted. Held-out work must wait for every development case to have a settled outcome. A further `--ack-circuit-reset` would require new evidence of service recovery; it applies only to unreserved cases and never retries timed-out IDs. No candidate prompt was created. The deterministic guided-demo stub was not used as evidence.
 
 ### Verification and handoff
 
 - `node scripts/ai-evaluation-v2.mjs validate` — passed; frozen v2 counts and hashes verified.
-- `npm run test:evaluation` — passed, including 17 v2 evaluator tests, 2 container-wrapper synchronization tests, and the original v1 evaluator tests. No live calls were made by these tests.
+- `npm run test:evaluation` — passed, including 18 v2 evaluator tests, 2 container-wrapper synchronization tests, and the original v1 evaluator tests. No live calls were made by these tests.
 - `./scripts/verify_phase3.sh` — passed: 197 backend tests (2 dependency deprecation warnings), lint, 33 browser tests, 48 workflow tests, syntax/JSON/Compose checks, and tracked-secret scan. Live runtime scenarios remain skipped by that verifier.
 - `bash -n scripts/ai-evaluation-via-n8n.sh`, Node syntax checks, and `git diff --check` — passed. The guided browser demo was not rerun because application/workflow behavior did not change.
 
