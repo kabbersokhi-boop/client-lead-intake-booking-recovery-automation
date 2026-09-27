@@ -104,6 +104,8 @@ test('changing a field output changes the matching score', () => {
   const wrong = runExportedValidator(contract, response(changed), item.input);
   assert.equal(gradeCase(item, correct).field_results.location, true);
   assert.equal(gradeCase(item, wrong).field_results.location, false);
+  const changedCase = { ...item, expected: { ...item.expected, location: 'Surrey' } };
+  assert.equal(gradeCase(changedCase, correct).field_results.location, false);
 });
 
 test('resume selection skips completed case IDs without duplicating calls', () => {
