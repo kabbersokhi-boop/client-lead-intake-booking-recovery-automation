@@ -129,6 +129,22 @@ test('fake transport settlement is durable and a competing invocation cannot acq
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('lock owned by another hostname fails closed instead of being treated as stale', () => {
+  const dir = tempDir();
+  try {
+    const lock = path.join(dir, '.lock');
+    fs.writeFileSync(lock, `${JSON.stringify({ pid: 123, hostname: 'other-host', token: 'foreign' })}\n`);
+    assert.throws(() => acquireLock(lock, { pidIsAlive: () => false }), /belongs to another host/);
+    assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, 'foreign');
+    fs.writeFileSync(lock, `${JSON.stringify({ pid: 123, hostname: os.hostname(), token: 'stale' })}\n`);
+    assert.throws(() => acquireLock(lock, { pidIsAlive: () => false }), /remove the stale lock manually/);
+    assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, 'stale');
+    fs.unlinkSync(lock); // operator-verified recovery in the isolated temp fixture
+    const unlock = acquireLock(lock);
+    unlock();
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('fake malformed output and timeout are settled, retained, and included in all-attempt denominators', async () => {
   const dir = tempDir();
   try {

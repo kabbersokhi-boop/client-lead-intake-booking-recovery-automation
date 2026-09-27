@@ -152,9 +152,10 @@ function acquireLock(lockPath, { pidIsAlive = (pid) => { try { process.kill(pid,
       let current;
       try { current = JSON.parse(read(lockPath)); }
       catch { throw new Error('Evaluation lock is unreadable; refusing concurrent calls. Inspect and recover manually.'); }
-      const active = current.hostname === os.hostname() && pidIsAlive(current.pid);
+      if (current.hostname !== os.hostname()) throw new Error('Evaluation lock belongs to another host; refusing concurrent calls until its owner is verified stopped.');
+      const active = pidIsAlive(current.pid);
       if (active) throw new Error(`Evaluation already running under PID ${current.pid}; refusing concurrent invocation.`);
-      fs.unlinkSync(lockPath);
+      throw new Error(`Evaluation lock owner PID ${current.pid} is no longer alive; verify no runner remains, then remove the stale lock manually before resuming.`);
     }
   }
   throw new Error('Unable to acquire evaluation lock.');
