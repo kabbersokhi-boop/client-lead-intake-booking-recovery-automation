@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
@@ -10,7 +9,9 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATASET_PATH = path.join(ROOT, 'n8n/evaluation/dataset-v1.json');
 const RUBRIC_PATH = path.join(ROOT, 'n8n/evaluation/rubric-v1.json');
 const WORKFLOW_PATH = path.join(ROOT, 'n8n/lead-intake.json');
-const RUN_DIR = path.join(ROOT, 'docs/reviews/ai-evaluation-runs');
+const RUN_DIR = process.env.AI_EVAL_RUN_DIR
+  ? path.resolve(process.env.AI_EVAL_RUN_DIR)
+  : path.join(ROOT, 'docs/reviews/ai-evaluation-runs');
 const FIELD_NAMES = ['service_type', 'location', 'preferred_time', 'urgency', 'summary'];
 const GRADED_FIELDS = ['service_type', 'location', 'preferred_time', 'urgency'];
 const SERVICE_TYPES = ['furnace_service', 'air_conditioning_service', 'plumbing_service', 'electrical_service', 'general_home_service', 'unknown'];
@@ -31,31 +32,6 @@ function loadProtectedEnv() {
     }
   }
   return { ...values, ...process.env };
-}
-
-function validProviderConfig(env) {
-  return Boolean(env.NVIDIA_NIM_API_KEY && !env.NVIDIA_NIM_API_KEY.startsWith('replace-with-')
-    && env.NVIDIA_NIM_MODEL && !env.NVIDIA_NIM_MODEL.startsWith('replace-with-'));
-}
-
-function discoverProviderEnv() {
-  const env = loadProtectedEnv();
-  if (validProviderConfig(env)) return env;
-  const secureRead = "const e=process.env;process.stdout.write(JSON.stringify({NVIDIA_NIM_API_KEY:e.NVIDIA_NIM_API_KEY||'',NVIDIA_NIM_MODEL:e.NVIDIA_NIM_MODEL||'',AI_PROVIDER_URL:e.AI_PROVIDER_URL||'',NVIDIA_NIM_TIMEOUT_MS:e.NVIDIA_NIM_TIMEOUT_MS||''}))";
-  try {
-    // Only the four named runtime values are read, held in process memory, and never logged.
-    const output = execFileSync('docker', ['exec', 'n8n', 'node', '-e', secureRead], {
-      encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore']
-    });
-    const runtime = JSON.parse(output);
-    if (validProviderConfig(runtime)) {
-      const nonEmptyRuntime = Object.fromEntries(Object.entries(runtime).filter(([, value]) => value !== ''));
-      return { ...env, ...nonEmptyRuntime };
-    }
-  } catch {
-    // No details from Docker errors are surfaced because they may contain environment context.
-  }
-  return env;
 }
 
 function readContract() {
@@ -283,7 +259,7 @@ async function runLive(split, runId) {
   const issues = validateDataset(dataset, rubric);
   if (issues.length) throw new Error(`Dataset validation failed: ${issues.join('; ')}`);
   const contract = readContract();
-  const env = discoverProviderEnv();
+  const env = loadProtectedEnv();
   const key = env.NVIDIA_NIM_API_KEY;
   const model = env.NVIDIA_NIM_MODEL;
   if (!key || key.startsWith('replace-with-') || !model || model.startsWith('replace-with-')) {
@@ -487,7 +463,7 @@ function generateReport() {
     'Category counts (development / held out): ' + Object.entries(categoryCounts).map(([category, counts]) => `${category} ${counts.development}/${counts.held_out}`).join('; ') + '.', '',
     '## Limitations and next step', '',
     'No production accuracy, customer ROI, or human validation is claimed. The narrow automatic claim guard can miss unsupported prose; the review-marked summaries must be checked by an operator. Milestone 2B should add an audited operator review/correction workflow that captures original model output, accepted corrections, reviewer identity/time, and a versioned reason without allowing model output to confirm bookings or invent facts.', '',
-    'Reproduction commands: `node scripts/ai-evaluation.mjs validate`; `npm run test:evaluation`; `node scripts/ai-evaluation.mjs run --split development --run-id baseline-development`; after freezing/selection, `node scripts/ai-evaluation.mjs run --split held_out --run-id baseline-held-out`; then `node scripts/ai-evaluation.mjs report`.', ''
+    'Reproduction commands: `node scripts/ai-evaluation.mjs validate`; `npm run test:evaluation`; `bash scripts/ai-evaluation-via-n8n.sh run --split development --run-id baseline-development`; after development selection, `bash scripts/ai-evaluation-via-n8n.sh run --split held_out --run-id baseline-held-out`; then `node scripts/ai-evaluation.mjs report`.', ''
   );
   fs.mkdirSync(path.join(ROOT, 'docs/reviews'), { recursive: true });
   fs.writeFileSync(path.join(ROOT, 'docs/reviews/milestone-2a-results.md'), lines.join('\n'));
