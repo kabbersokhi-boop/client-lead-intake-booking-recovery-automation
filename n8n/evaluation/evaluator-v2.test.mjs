@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -207,7 +208,8 @@ test('complete report coverage is derived from validated manifest records, not h
     events.push({ ...context, kind: 'reservation', request_id: requestId });
     events.push({ ...context, kind: 'sent', request_id: requestId });
     const extracted = expectedExtraction(item);
-    events.push({ ...context, kind: 'settlement', request_id: requestId, outcome: 'usable_output', http_status: 200, latency_ms: index + 1, extracted, grading: gradeCase(item, { enrichment: extracted }), token_usage: null, raw_model_content: null, response_content_hash: null, error_class: null });
+    const retained = JSON.stringify(extracted);
+    events.push({ ...context, kind: 'settlement', request_id: requestId, outcome: 'usable_output', http_status: 200, latency_ms: index + 1, extracted, grading: gradeCase(item, { enrichment: extracted }), token_usage: null, raw_model_content: retained, response_content_hash: crypto.createHash('sha256').update(retained).digest('hex'), error_class: null });
   }
   const complete = parseAndValidateLedger({ text: events.map(JSON.stringify).join('\n'), dataset: data });
   const report = formatReport([complete], data);
@@ -215,6 +217,12 @@ test('complete report coverage is derived from validated manifest records, not h
   assert.match(report, /development 40\/40 reserved, 40\/40 settled/);
   assert.match(report, /No settled failures among 40 retained responses/);
   assert.doesNotMatch(report, /No retained provider responses to inspect/);
+  const tampered = structuredClone(events);
+  const firstSettlement = tampered.find((event) => event.kind === 'settlement');
+  firstSettlement.extracted.location = 'Richmond';
+  firstSettlement.raw_model_content = JSON.stringify(firstSettlement.extracted);
+  firstSettlement.response_content_hash = crypto.createHash('sha256').update(firstSettlement.raw_model_content).digest('hex');
+  assert.throws(() => parseAndValidateLedger({ text: tampered.map(JSON.stringify).join('\n'), dataset: data }), /Stored grade does not match/);
 });
 
 test('report rejects incompatible dev/held-out experiment identities and never silently drops malformed/duplicate rows', () => {

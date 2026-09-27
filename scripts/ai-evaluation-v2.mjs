@@ -214,6 +214,14 @@ function parseAndValidateLedger({ text, dataset, expectedManifest = null, expect
         if (event.outcome === 'usable_output' && (!(event.http_status >= 200 && event.http_status < 300) || !event.extracted || !event.grading || typeof event.grading.automatic_semantic_correct !== 'boolean')) throw new Error('Usable settlement has inconsistent status or missing extraction/grading.');
         if ((event.outcome === 'timeout' || event.outcome === 'provider_failure') && event.grading !== null) throw new Error('Failed request cannot have semantic grading.');
         if (event.token_usage !== null && event.token_usage !== undefined && typeof event.token_usage !== 'object') throw new Error('Malformed token usage.');
+        if (event.outcome === 'usable_output') {
+          if (typeof event.raw_model_content !== 'string' || sha256(event.raw_model_content) !== event.response_content_hash) throw new Error('Retained model output hash is missing or inconsistent.');
+          let retainedOutput;
+          try { retainedOutput = JSON.parse(event.raw_model_content); } catch { throw new Error('Usable retained model output is not valid JSON.'); }
+          const revalidated = validatePayload({ choices: [{ message: { content: JSON.stringify(retainedOutput) } }] }, readContract(), item.input);
+          if (revalidated.ai_status !== 'enriched' || stableJson(revalidated.enrichment) !== stableJson(event.extracted)) throw new Error('Retained extraction does not match the exported validator contract.');
+          if (stableJson(gradeCase(item, revalidated)) !== stableJson(event.grading)) throw new Error('Stored grade does not match retained output and frozen rubric.');
+        }
         settlements.set(event.request_id, event);
       }
     }
@@ -450,7 +458,7 @@ function responseRecord(responseJson, item, input, contract, manifest, context, 
     error_class: errorClass,
     extracted,
     raw_model_content: safeContent,
-    response_content_hash: typeof content === 'string' ? sha256(content) : null,
+    response_content_hash: typeof safeContent === 'string' ? sha256(safeContent) : null,
     grading,
     latency_ms: latencyMs,
     token_usage: usage
