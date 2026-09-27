@@ -1,0 +1,39 @@
+{
+  "version": "synthetic-rubric-v2",
+  "supersedes": "synthetic-rubric-v1-for-retrospective-and-new-v2-grading-only",
+  "policy_notice": "Synthetic business labeling convention only; not clinical or professionally validated safety guidance.",
+  "changes_from_v1": [
+    {
+      "change": "Potential unsupported prose claims are review-required and never automatically fail otherwise-correct structured fields.",
+      "rationale": "The v1 lexical guard cannot distinguish provider claims from customer availability, negation, or quoted text. Its hits are not semantic evidence."
+    },
+    {
+      "change": "Urgency on cases S001 and M002 is excluded from automatic urgency agreement and marked review-required; original labels remain unchanged.",
+      "rationale": "The v1 rubric maps no heat to high, while these furnace failures label medium. The v2 dataset overlay corrects both expected labels to high; retained v1 scores are unchanged and v2 regrading is retrospective."
+    },
+    {
+      "change": "Clarifies that a minor contained tap drip with no damage is medium, while active leak/backup is high and uncontrolled spread is urgent.",
+      "rationale": "The v1 phrase 'active leak without uncontrolled spread' could over-include the low-impact U004 tap drip. The v2 boundary makes the intended severity distinction inspectable without changing U004's medium label."
+    },
+    {
+      "change": "Summary prose remains review-required for every case.",
+      "rationale": "No validated semantic grader exists for paraphrase support or unsupported assertions."
+    }
+  ],
+  "urgency_policy": {
+    "urgent": "Immediate hazard or uncontrolled active damage.",
+    "high": "No heat or essential hot water unavailable; active leak/backup without uncontrolled spread; same-day preference with vulnerable occupant and essential heating/cooling loss.",
+    "medium": "Ordinary repair, including a minor contained tap drip with no damage, or a plausible fault without stronger cues. Clear loss of heat is high even if no same-day preference is stated.",
+    "low": "Routine/future/resolved issue, explicit no-rush request, or unsupported non-service enquiry."
+  },
+  "urgency_review_required_case_ids": [],
+  "prose_claim_policy": "A narrow lexical signal may request human review but cannot change structured-field semantic score. All summaries already require review. No semantic understanding is claimed.",
+  "field_grading": {
+    "service_type": "Exact enum equality; explicit per-case alternatives pass.",
+    "location": "Expected null requires null; otherwise trimmed/case-folded/repeated-whitespace-normalized equality only.",
+    "preferred_time": "Expected null requires null; otherwise trimmed/case-folded/repeated-whitespace-normalized equality only.",
+    "urgency": "Exact synthetic-policy enum equality except listed inconsistent v1 labels, which require review and are excluded from automatic urgency denominator.",
+    "summary": "Review required; never included in automatic structured-field accuracy."
+  },
+  "retrospective_notice": "Applying v2 to retained v1 model outputs is retrospective regrading, not a fresh independent evaluation. The published v1 results and artifacts are immutable historical evidence."
+}

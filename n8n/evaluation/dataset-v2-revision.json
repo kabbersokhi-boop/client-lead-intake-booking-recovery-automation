@@ -1,0 +1,16 @@
+{
+  "version": "synthetic-dataset-v2-overlay",
+  "base_dataset": "dataset-v1.json",
+  "base_sha256": "695e9bbc9b541ae072731f5aa7f18ff4651632168de77677855a89375594a9d9",
+  "case_overrides": {
+    "S001": {
+      "expected": { "service_type": "furnace_service", "location": "Surrey", "preferred_time": "Tuesday afternoon", "urgency": "high" },
+      "rationale": "Clear furnace loss of heat is high under rubric-v2, independent of whether same-day service is requested."
+    },
+    "M002": {
+      "expected": { "service_type": "furnace_service", "location": "Maple Ridge", "preferred_time": "Tomorrow morning", "urgency": "high" },
+      "rationale": "Typo-tolerant reading identifies a furnace that is not heating; clear loss of heat is high under rubric-v2."
+    }
+  },
+  "revision_rationale": "Only S001 and M002 urgency labels change, correcting the v1 dataset/rubric contradiction. All other case text and labels inherit unchanged from the frozen v1 dataset. This overlay and rubric-v2 are frozen before new provider calls; the v1 dataset, rubric, outputs, and published scores remain historical and unchanged."
+}
