@@ -41,3 +41,5 @@ jobs:
         working-directory: .
       - run: npm run test:workflow
         working-directory: .
+      - run: npm run test:evaluation
+        working-directory: .

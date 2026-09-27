@@ -3,6 +3,7 @@
   "scripts": {
     "test:browser": "node --test frontend/test/*.test.js",
     "test:workflow": "node --test n8n/tests/*.test.js",
+    "test:evaluation": "node --test n8n/evaluation/*.test.mjs",
     "test:demo": "node --test frontend/e2e/demo.e2e.mjs"
   },
   "devDependencies": {

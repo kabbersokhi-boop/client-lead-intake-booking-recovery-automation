@@ -1,0 +1,20 @@
+{
+  "version": "synthetic-rubric-v1",
+  "policy_notice": "This is a synthetic business labeling convention for evaluator repeatability. It is not clinical, emergency-response, or professionally validated safety guidance.",
+  "urgency": {
+    "urgent": "Current immediate hazard or uncontrolled active damage: gas smell now, sparking/smoking electrical equipment, water actively spreading or entering the building. A stated immediate response request can be recorded as a time preference but does not confirm service availability.",
+    "high": "No heat, essential hot water unavailable, active leak without uncontrolled spread, or a recent serious cue that is no longer active; same-day preference or a vulnerable occupant with loss of essential heating/cooling also maps here.",
+    "medium": "Ordinary current repair request or a plausible but unconfirmed fault without stronger cues. If a service request is clear but urgency is unstated, use medium.",
+    "low": "Routine maintenance, future renovation, minor inconvenience, resolved/past issue, explicit no-rush request, or unsupported non-service enquiry."
+  },
+  "service_taxonomy": "Use the closest single enum for a clearly identified system. Thermostat and heat-pump work map to general_home_service. Multiple distinct systems or uncertain cause across categories map to general_home_service; when no actionable home service is identified, use unknown. This is a dataset convention, not the production prompt's detailed policy.",
+  "field_grading": {
+    "service_type": "Exact enum equality; only explicit per-case alternatives may pass.",
+    "location": "Expected null requires null. Otherwise compare trimmed, case-folded strings with repeated whitespace collapsed; preserve stated specificity and do not infer location. No geocoding or semantic alias guessing.",
+    "preferred_time": "Expected null requires null. Otherwise same conservative normalization as location; preserve relative phrasing and specificity. No calendar/time-zone inference.",
+    "urgency": "Exact enum equality under the synthetic policy above.",
+    "summary": "review required for every case. Reviewers compare supported issue, material qualifiers, time/hazard status, and whether unsupported facts were added. It is excluded from automatic semantic-accuracy claims."
+  },
+  "automatic_claim_guard": "The harness deterministically checks enum/nullable fields, exact expected location/time normalization (including null expectations), schema validity, and high-confidence price/booking/availability claim patterns. This guard does not prove all unsupported prose claims absent; summaries require human review.",
+  "held_out_rule": "Freeze the dataset file and this rubric before any provider calls. Do not edit labels after development results. Candidate selection, if ever used, must happen on development only; held-out results are reported once without tuning."
+}
