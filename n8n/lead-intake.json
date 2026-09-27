@@ -80,7 +80,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "url": "={{ $env.AI_PROVIDER_URL || 'https://integrate.api.nvidia.com/v1/chat/completions' }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

@@ -4,6 +4,35 @@ An HVAC enquiry is useful only if the business can act on it. This system accept
 
 **Stack:** JavaScript browser UI and n8n workflows; FastAPI/Python and PostgreSQL for application state; a real HighLevel Contact and Opportunity integration over REST using a Private Integration Token (PIT); optional NVIDIA NIM extraction; development email through Mailpit; and downstream Make.com → Google Sheets reporting. Docker Compose runs the local API, database, CRM contract simulator, and mail sink.
 
+## Try the guided demo
+
+From a fresh checkout, the interview-safe demo needs Docker with Compose, `curl`, and
+`openssl`; it does not need HighLevel, NVIDIA, Make, email, or other external credentials:
+
+```bash
+./scripts/demo up
+```
+
+Open **http://localhost:28000/demo.html**. The page runs five synthetic journeys through a
+dedicated n8n instance, FastAPI, PostgreSQL, and the local HighLevel contract simulator:
+normal intake, equivalent replay, AI timeout fallback, CRM 429 recovery, and a remote commit
+whose acknowledgement is lost. Each result is checked against database and simulator state,
+not inferred from a frontend timer or a green workflow alone.
+
+```bash
+npm ci                         # only needed for automated browser verification
+npm run test:demo              # real headless-Chrome journey through all five scenarios
+./scripts/demo reset           # removes only the isolated hvac-guided-demo resources
+```
+
+The stack uses separate named volumes, generated ignored secrets, and loopback ports
+`25678`, `28000`, `28025`, and `28080`; it does not reuse or reset the preserved development
+runtime. The AI endpoint is an explicitly labeled deterministic test provider. CRM faults are
+local, one-shot, and scoped to the selected submission. Appointments remain local, and email
+remains inside Mailpit. See the [three-minute and deeper walkthrough](docs/guided-demo.md).
+
+![Guided reliability demo](docs/assets/demo/guided-demo-overview.png)
+
 ```mermaid
 flowchart TD
     Browser[Customer service request] --> Intake[n8n intake workflow]

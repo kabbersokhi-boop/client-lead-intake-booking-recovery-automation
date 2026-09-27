@@ -26,6 +26,8 @@ def test_sanitized_workflow_has_required_safety_controls():
     assert nvidia_request["options"]["timeout"] == (
         "={{ Number($env.NVIDIA_NIM_TIMEOUT_MS || 18000) }}"
     )
+    assert "$env.AI_PROVIDER_URL" in nvidia_request["url"]
+    assert "https://integrate.api.nvidia.com/v1/chat/completions" in nvidia_request["url"]
     assert "max_tokens: 180" in nvidia_request["jsonBody"]
 
     crm_request = nodes["Create CRM Lead"]["parameters"]

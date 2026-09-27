@@ -228,6 +228,77 @@ def test_one_shot_429_preserves_retry_after_and_resets(simulator):
     assert rate_limit_event["retryAfter"] == "9"
 
 
+def test_fault_can_be_scoped_to_one_submission_and_target_path(simulator):
+    target = str(uuid.uuid4())
+    other = contact_body()
+    target_body = contact_body(
+        email="scoped-target@example.com",
+        phone="+16045550178",
+        customFields=[
+            {"id": "sim_cf_submission_id", "fieldValue": target},
+            {"id": "sim_cf_correlation_id", "fieldValue": str(uuid.uuid4())},
+        ],
+    )
+    simulator.post(
+        "/simulator/api/fault",
+        json={
+            "mode": "rate_limited",
+            "retry_after": 3,
+            "submission_id": target,
+            "target_path": "/contacts/upsert",
+        },
+    )
+
+    assert create_contact(simulator, other).status_code == 200
+    assert create_contact(simulator, target_body).status_code == 429
+    assert create_contact(simulator, target_body).status_code == 200
+
+
+def test_lost_acknowledgement_commits_before_client_timeout(simulator):
+    body = contact_body()
+    submission_id = body["customFields"][0]["fieldValue"]
+    contact = create_contact(simulator, body).json()["contact"]
+    opportunity = {
+        "pipelineId": "sim_pipeline_hvac",
+        "locationId": "sim_location_reference",
+        "name": "Lost ACK synthetic opportunity",
+        "pipelineStageId": "sim_stage_new_lead",
+        "status": "open",
+        "contactId": contact["id"],
+        "customFields": [
+            {"id": "sim_of_submission_id", "fieldValue": submission_id}
+        ],
+    }
+    simulator.post(
+        "/simulator/api/fault",
+        json={
+            "mode": "lost_acknowledgement",
+            "retry_after": 1,
+            "submission_id": submission_id,
+            "target_path": "/opportunities/",
+        },
+    )
+
+    with pytest.raises(httpx.ReadTimeout):
+        simulator.post(
+            "/opportunities/",
+            headers=headers(),
+            json=opportunity,
+            timeout=0.001,
+        )
+    time.sleep(0.05)
+    snapshot = simulator.get("/simulator/api/state").json()
+    assert len(snapshot["opportunities"]) == 1
+    matching = [
+        event
+        for event in snapshot["events"]
+        if event["submissionReference"] == submission_id
+        and event["path"] == "/opportunities/"
+    ]
+    assert len(matching) == 1
+    assert matching[0]["status"] == 201
+
+
 @pytest.mark.parametrize(
     ("mode", "status_code"),
     [("unauthorized", 401), ("server_error", 500)],

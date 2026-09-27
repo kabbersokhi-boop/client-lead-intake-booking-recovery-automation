@@ -9,3 +9,5 @@ htmlcov/
 coverage.xml
 backend/.coverage
 postgres-data/
+.demo/
+node_modules/

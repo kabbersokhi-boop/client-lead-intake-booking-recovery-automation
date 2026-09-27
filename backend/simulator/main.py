@@ -86,7 +86,12 @@ class SimulatorState:
         self.opportunities: dict[str, dict[str, Any]] = {}
         self.appointments: dict[str, dict[str, Any]] = {}
         self.events: list[dict[str, Any]] = []
-        self.fault = {"mode": "normal", "retry_after": 5}
+        self.fault = {
+            "mode": "normal",
+            "retry_after": 5,
+            "submission_id": None,
+            "target_path": None,
+        }
 
     def reset(self) -> None:
         with self.lock:
@@ -94,18 +99,53 @@ class SimulatorState:
             self.opportunities.clear()
             self.appointments.clear()
             self.events.clear()
-            self.fault = {"mode": "normal", "retry_after": 5}
+            self.fault = {
+                "mode": "normal",
+                "retry_after": 5,
+                "submission_id": None,
+                "target_path": None,
+            }
 
-    def arm_fault(self, mode: str, retry_after: int) -> dict[str, Any]:
+    def arm_fault(
+        self,
+        mode: str,
+        retry_after: int,
+        submission_id: str | None = None,
+        target_path: str | None = None,
+    ) -> dict[str, Any]:
         with self.lock:
-            self.fault = {"mode": mode, "retry_after": retry_after}
+            self.fault = {
+                "mode": mode,
+                "retry_after": retry_after,
+                "submission_id": submission_id,
+                "target_path": target_path,
+            }
             return dict(self.fault)
 
-    def consume_fault(self) -> dict[str, Any]:
+    def consume_fault(self, path: str, submission_id: str | None) -> dict[str, Any]:
         with self.lock:
             armed = dict(self.fault)
-            if armed["mode"] != "normal":
-                self.fault = {"mode": "normal", "retry_after": 5}
+            matches = (
+                armed["mode"] != "normal"
+                and (armed["target_path"] is None or armed["target_path"] == path)
+                and (
+                    armed["submission_id"] is None
+                    or armed["submission_id"] == submission_id
+                )
+            )
+            if not matches:
+                return {
+                    "mode": "normal",
+                    "retry_after": 5,
+                    "submission_id": None,
+                    "target_path": None,
+                }
+            self.fault = {
+                "mode": "normal",
+                "retry_after": 5,
+                "submission_id": None,
+                "target_path": None,
+            }
             return armed
 
     def record(
@@ -123,7 +163,10 @@ class SimulatorState:
         correlation = None
         if isinstance(request_body, dict):
             for field in request_body.get("customFields", []):
-                if isinstance(field, dict) and field.get("id") == "sim_cf_submission_id":
+                if isinstance(field, dict) and field.get("id") in {
+                    "sim_cf_submission_id",
+                    "sim_of_submission_id",
+                }:
                     correlation = field.get("fieldValue")
         event = {
             "requestId": request_id,
@@ -215,8 +258,17 @@ class OpportunityUpdate(BaseModel):
 class FaultRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["normal", "unauthorized", "rate_limited", "server_error", "timeout"]
+    mode: Literal[
+        "normal",
+        "unauthorized",
+        "rate_limited",
+        "server_error",
+        "timeout",
+        "lost_acknowledgement",
+    ]
     retry_after: int = Field(default=5, ge=1, le=30)
+    submission_id: str | None = Field(default=None, pattern=r"^[0-9a-f-]{36}$")
+    target_path: Literal["/contacts/upsert", "/opportunities/"] | None = None
 
 
 app = FastAPI(title="HighLevel Contract Simulator", version="0.1.0")
@@ -249,6 +301,14 @@ async def contract_boundary(request: Request, call_next):
     except ValueError:
         request_body = None
     query = dict(request.query_params)
+    submission_id = None
+    if isinstance(request_body, dict):
+        for field in request_body.get("customFields", []):
+            if isinstance(field, dict) and field.get("id") in {
+                "sim_cf_submission_id",
+                "sim_of_submission_id",
+            }:
+                submission_id = field.get("fieldValue")
 
     async def finish(status_code: int, body: dict[str, Any], headers: dict | None = None):
         response_headers = dict(headers or {})
@@ -285,7 +345,7 @@ async def contract_boundary(request: Request, call_next):
             },
         )
 
-    fault = state.consume_fault()
+    fault = state.consume_fault(request.url.path, submission_id)
     if fault["mode"] == "unauthorized":
         return await finish(
             401,
@@ -325,6 +385,10 @@ async def contract_boundary(request: Request, call_next):
     )
     headers = dict(response.headers)
     headers["X-Simulator-Request-Id"] = request_id
+    if fault["mode"] == "lost_acknowledgement":
+        # The route has committed the external effect. Delay only the acknowledgement
+        # beyond the adapter timeout so recovery must reconcile before another write.
+        await asyncio.sleep(FAULT_TIMEOUT_SECONDS)
     return Response(
         content=response_bytes,
         status_code=response.status_code,
@@ -516,12 +580,23 @@ def simulator_state() -> dict[str, Any]:
 
 
 @app.post("/simulator/api/fault")
-def configure_fault(payload: FaultRequest) -> dict[str, Any]:
-    return state.arm_fault(payload.mode, payload.retry_after)
+def configure_fault(payload: FaultRequest, request: Request) -> dict[str, Any]:
+    expected = os.environ.get("DEMO_CONTROL_KEY", "")
+    if expected and request.headers.get("X-Demo-Control-Key") != expected:
+        raise HTTPException(status_code=403, detail="Demo control key is required")
+    return state.arm_fault(
+        payload.mode,
+        payload.retry_after,
+        payload.submission_id,
+        payload.target_path,
+    )
 
 
 @app.post("/simulator/api/reset")
-def reset_simulator() -> dict[str, bool]:
+def reset_simulator(request: Request) -> dict[str, bool]:
+    expected = os.environ.get("DEMO_CONTROL_KEY", "")
+    if expected and request.headers.get("X-Demo-Control-Key") != expected:
+        raise HTTPException(status_code=403, detail="Demo control key is required")
     state.reset()
     return {"reset": True}
 

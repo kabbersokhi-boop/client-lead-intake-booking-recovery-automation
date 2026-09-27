@@ -21,6 +21,10 @@ app.include_router(router)
 app.include_router(stage_sync_router)
 app.include_router(operations_router)
 app.include_router(reporting_router)
+if settings.demo_mode:
+    from app.api.demo import router as demo_router
+
+    app.include_router(demo_router)
 
 
 @app.get("/api/config")

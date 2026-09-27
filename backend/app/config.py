@@ -37,11 +37,19 @@ class Settings(BaseSettings):
     crm_recovery_lease_seconds: int = 30
     stage_sync_lease_seconds: int = 180
     crm_retry_fallback_seconds: int = 10
+    demo_mode: bool = False
+    demo_n8n_base_url: str = "http://n8n:5678"
+    demo_simulator_control_url: str = "http://highlevel-simulator:8080"
+    demo_ai_base_url: str = "http://demo-ai:8081"
+    demo_mailpit_base_url: str = "http://mailpit:8025"
+    demo_control_key: SecretStr | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @model_validator(mode="after")
     def validate_highlevel_target(self):
+        if self.demo_mode and not self.demo_control_key:
+            raise ValueError("DEMO_CONTROL_KEY is required when DEMO_MODE is enabled.")
         if self.crm_provider_mode == "highlevel_live":
             if not self.highlevel_live_token:
                 raise ValueError("HIGHLEVEL_LIVE_TOKEN is required in highlevel_live mode.")

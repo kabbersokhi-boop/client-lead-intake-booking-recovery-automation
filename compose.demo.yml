@@ -1,0 +1,142 @@
+name: hvac-guided-demo
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: guided_demo
+      POSTGRES_USER: guided_demo
+      POSTGRES_PASSWORD: ${DEMO_POSTGRES_PASSWORD:?run ./scripts/demo up}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guided_demo -d guided_demo"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - demo-postgres:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://guided_demo:${DEMO_POSTGRES_PASSWORD}@postgres:5432/guided_demo
+      CRM_ADAPTER_API_KEY: ${DEMO_ADAPTER_KEY}
+      CRM_PROVIDER_MODE: highlevel_simulator
+      HIGHLEVEL_BASE_URL: http://highlevel-simulator:8080
+      HIGHLEVEL_SIMULATOR_TOKEN: ${DEMO_SIMULATOR_TOKEN}
+      HIGHLEVEL_TIMEOUT_SECONDS: 1
+      CRM_RETRY_FALLBACK_SECONDS: 1
+      CRM_RECOVERY_LEASE_SECONDS: 15
+      FOLLOW_UP_DELAY_SECONDS: 120
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      N8N_WEBHOOK_URL: http://localhost:25678/webhook/lead-intake
+      N8N_BOOKING_WEBHOOK_URL: http://localhost:25678/webhook/appointment-booking
+      N8N_EDITOR_BASE_URL: http://localhost:25678
+      DEMO_MODE: "true"
+      DEMO_N8N_BASE_URL: http://n8n:5678
+      DEMO_SIMULATOR_CONTROL_URL: http://highlevel-simulator:8080
+      DEMO_AI_BASE_URL: http://demo-ai:8081
+      DEMO_MAILPIT_BASE_URL: http://mailpit:8025
+      DEMO_CONTROL_KEY: ${DEMO_CONTROL_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      highlevel-simulator:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:28000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  highlevel-simulator:
+    build:
+      context: .
+      dockerfile: backend/simulator/Dockerfile
+    environment:
+      HIGHLEVEL_SIMULATOR_TOKEN: ${DEMO_SIMULATOR_TOKEN}
+      HIGHLEVEL_SIMULATOR_FAULT_TIMEOUT_SECONDS: 2.5
+      DEMO_CONTROL_KEY: ${DEMO_CONTROL_KEY}
+    ports:
+      - "127.0.0.1:28080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  demo-ai:
+    build:
+      context: .
+      dockerfile: backend/demo_ai/Dockerfile
+    environment:
+      DEMO_AI_TOKEN: ${DEMO_AI_TOKEN}
+      DEMO_AI_TIMEOUT_SECONDS: 2
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:v1.27.8
+    ports:
+      - "127.0.0.1:28025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  n8n:
+    image: n8nio/n8n:2.39.8
+    entrypoint: ["/bin/sh", "/demo/n8n-entrypoint.sh"]
+    environment:
+      N8N_ENCRYPTION_KEY: ${DEMO_N8N_ENCRYPTION_KEY}
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_WEBHOOK_URL: http://localhost:25678/
+      N8N_EDITOR_BASE_URL: http://localhost:25678/
+      N8N_SECURE_COOKIE: "false"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: all
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      GENERIC_TIMEZONE: America/Vancouver
+      CRM_ADAPTER_URL: http://backend:8000
+      CRM_ADAPTER_API_KEY: ${DEMO_ADAPTER_KEY}
+      CRM_ADAPTER_TIMEOUT_MS: 4000
+      CRM_CONTROL_TIMEOUT_MS: 3000
+      AI_PROVIDER_URL: http://demo-ai:8081/v1/chat/completions
+      NVIDIA_NIM_API_KEY: ${DEMO_AI_TOKEN}
+      NVIDIA_NIM_MODEL: deterministic-demo-provider
+      NVIDIA_NIM_TIMEOUT_MS: 500
+    volumes:
+      - demo-n8n:/home/node/.n8n
+      - ./n8n:/demo/workflows:ro
+      - ./scripts/demo_n8n_entrypoint.sh:/demo/n8n-entrypoint.sh:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      demo-ai:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:25678:5678"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5678/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+volumes:
+  demo-postgres:
+  demo-n8n:

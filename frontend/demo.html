@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reliability Lab | Guided Local Demo</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/demo.css" />
+  </head>
+  <body>
+    <main class="demo-shell">
+      <header class="demo-hero">
+        <div>
+          <p class="eyebrow">Three-minute guided demonstration</p>
+          <h1>AI automation reliability lab</h1>
+          <p>Run five synthetic journeys through real n8n workflows, FastAPI, PostgreSQL, and the local HighLevel contract simulator.</p>
+        </div>
+        <div class="demo-boundary">
+          <strong>LOCAL · SYNTHETIC · NO EXTERNAL ACCOUNTS</strong>
+          <span>Deterministic test AI, simulated CRM faults, Mailpit-only email.</span>
+        </div>
+      </header>
+
+      <section class="readiness" aria-live="polite">
+        <div><p class="eyebrow">Environment</p><h2 id="readiness-title">Checking isolated stack…</h2></div>
+        <div id="readiness-checks" class="readiness-checks"></div>
+      </section>
+
+      <section class="scenario-grid" aria-label="Guided reliability scenarios">
+        <article class="scenario" data-scenario="normal">
+          <span class="scenario-number">01</span><h2>Normal intake</h2>
+          <p>A synthetic enquiry crosses every boundary and produces one verified CRM projection.</p>
+          <button type="button">Run normal intake</button>
+        </article>
+        <article class="scenario" data-scenario="duplicate">
+          <span class="scenario-number">02</span><h2>Equivalent duplicate</h2>
+          <p>The same business operation is delivered twice; replay returns the original result without duplication.</p>
+          <button type="button">Run duplicate replay</button>
+        </article>
+        <article class="scenario" data-scenario="ai_unavailable">
+          <span class="scenario-number">03</span><h2>AI unavailable</h2>
+          <p>The deterministic model endpoint times out. The valid enquiry survives and is marked for review.</p>
+          <button type="button">Run AI fallback</button>
+        </article>
+        <article class="scenario" data-scenario="rate_limit">
+          <span class="scenario-number">04</span><h2>CRM rate limiting</h2>
+          <p>A fault scoped to this submission returns 429. Durable recovery respects Retry-After and completes later.</p>
+          <button type="button">Run 429 recovery</button>
+        </article>
+        <article class="scenario" data-scenario="lost_acknowledgement">
+          <span class="scenario-number">05</span><h2>Lost acknowledgement</h2>
+          <p>The remote effect commits but its reply is delayed past timeout. Recovery reconciles before another write.</p>
+          <button type="button">Run lost-ACK recovery</button>
+        </article>
+      </section>
+
+      <section id="scenario-result" class="scenario-result" hidden aria-live="polite">
+        <div class="result-heading">
+          <div><p class="eyebrow">Observed result</p><h2 id="scenario-result-title"></h2></div>
+          <span id="scenario-verdict" class="status-chip"></span>
+        </div>
+        <p id="scenario-explanation"></p>
+        <ol id="scenario-timeline" class="demo-timeline"></ol>
+        <details>
+          <summary>Technical evidence from PostgreSQL and the simulator</summary>
+          <pre id="scenario-evidence"></pre>
+        </details>
+      </section>
+
+      <footer class="demo-footer">
+        <a href="/">Customer request UI</a>
+        <a href="/operations.html">Operations evidence</a>
+        <a href="http://localhost:28080" target="_blank" rel="noreferrer">HighLevel simulator</a>
+        <a href="http://localhost:28025" target="_blank" rel="noreferrer">Mailpit</a>
+      </footer>
+    </main>
+    <script src="/demo.js"></script>
+  </body>
+</html>
