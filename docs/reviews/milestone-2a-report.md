@@ -1,5 +1,68 @@
 # Milestone 2A: reproducible AI extraction evaluation
 
+## Correction pass (2026-09-28)
+
+**Status: partial.** The compatibility, durability, scoring-integrity, and reporting corrections are implemented and committed. The real-provider v2 baseline is resumable but incomplete: the explicit circuit breaker stopped after three consecutive 18-second timeouts. Development is 3/40 settled; held-out is gated and has 0/20 requests. Do not interpret this as a completed evaluation.
+
+Branch: `milestone-2a-ai-evaluation`
+
+Milestone 1 baseline: `6473e37131cb9cc948b859b35dc6689e3a65d796`
+
+Final implementation SHA: `47437ee4b4e4e3a5edadb1a3ae5a917827e23dd1`
+
+Implementation commits: `11bcfb22ae7b8e04836800459e0d98f546089cdc` (protocol, harness, and retained partial run), `4af56055fcfb218c31d307282c6e4096ca88002a` (retained-output/grade consistency), `56d8c02a6be5af9c9e043b1d8db2ec9425d164a2` (fail-closed stale-lock handling), and `47437ee4b4e4e3a5edadb1a3ae5a917827e23dd1` (README links to both result versions).
+
+The original v1 dataset, rubric, 13 provider observations, and published v1 results remain unchanged. Their file hashes are still dataset `695e9bbc9b541ae072731f5aa7f18ff4651632168de77677855a89375594a9d9`, rubric `7c2f201908448a4624792be44870ff945833eae0551edf909defaeefd6933cf5`, 13-call ledger `238d5fdf36f43ce6771c1a55f35b2fed65b5e9b4bdcd64fd8599d73128ca2f69`, and published results `decb0fce8f2c19a5a3f449d6d78222e4bbd1fb8fbfb451d58394f1fa4d8533e2`. [The v1 results](milestone-2a-results.md) remain the historical report; they are not silently replaced by revised scores.
+
+### Findings and corrections
+
+1. **Experiment compatibility.** The old resume/report path compared only selected dataset/prompt fields, did not validate every row against the header, and could silently drop unknown or duplicate rows. The v2 runner uses one canonical experiment ID over provider, model, secret-free endpoint identity, inference settings, execution policy, timeout, prompt and validator hashes, effective dataset, rubric, and grader version. Resume and report use the same manifest/record validator. It rejects incompatible identities, malformed events, duplicate reservations/settlements, unknown IDs, wrong splits, mismatched input hashes, and per-record configuration drift. Manifest and record hashes are retained in each event. For usable responses, report validation also verifies the retained-output hash, reruns the exported schema validator, and recomputes grading before accepting stored scores. See [ai-evaluation-v2.mjs](../../scripts/ai-evaluation-v2.mjs) and [evaluator-v2.test.mjs](../../n8n/evaluation/evaluator-v2.test.mjs).
+
+2. **Durable request accounting.** The v2 ledger fsyncs a request reservation before the send marker/network call, then fsyncs settlement. Any reservation without settlement becomes `unknown_request_outcome`, counts against the 150-call cap, and is never silently retried. A global exclusive lock protects cap checks and reservations. Active, foreign-host, and stale locks all fail closed; after an interrupted process, an operator must verify the runner is stopped and remove the stale lock before resuming. The protected-container wrapper now copies evidence back after a failed command and refuses divergent local/remote ledgers. Fake-transport interruption, restart/no-duplicate, concurrent lock, cap, and wrapper-failure/divergence tests pass. No n8n workflow or credentials were changed.
+
+3. **Scoring integrity.** Audit confirmed the v1 rubric says “no heat” is high while v1 cases S001 and M002 expected medium. Those original labels and scores remain intact. The versioned [v2 dataset overlay](../../n8n/evaluation/dataset-v2-revision.json) changes only those two expected urgency labels to high, with per-case rationale. The v2 rubric also clarifies that U004’s minor contained tap drip/no damage remains medium; active leak/backup is high and uncontrolled spread is urgent. These corrections are documented in [rubric-v2.json](../../n8n/evaluation/rubric-v2.json), with the v1/v2 distinction preserved. V2 is a new frozen evaluation, not a retrospective relabeling of v1 outputs.
+
+   The v1 prohibited-claim regex could flag customer availability, negation, and quotes as provider assertions. V2 lexical hits are human-review cues only and cannot fail otherwise-correct structured fields. Tests cover customer availability, negated and quoted text, and unsupported booking/price language. The detector does not claim semantic understanding. Every summary remains review-required. All v2 scores, if any, are mechanical agreement with synthetic labels—not validated semantic accuracy.
+
+4. **Reproducible reporting.** V2 report generation validates the manifests and all records before deriving coverage, outcome counts, denominators, categories, field scores, and usage. Empty, partial, complete-development, malformed, and mixed-configuration artifacts are covered. Unknown reservations remain in attempted totals; missing token usage is explicitly unavailable. A populated all-pass fixture is not described as having no responses to inspect. The v1 published report was not regenerated.
+
+### Frozen v2 data and live baseline
+
+The effective v2 dataset is 60 synthetic cases, 40 development and 20 held-out, composed from the unchanged v1 base plus the frozen two-label overlay. Its effective canonical SHA-256 is `d6780d5a945bf097cfe8dde076a30a7d6973308f7ab483234f54310e5a57b61b`; overlay SHA-256 is `fab3833ea2021e88c0ef3ed811399bf1a26d6f571b28cc9dc8b05e92a2977150`; rubric-v2 SHA-256 is `fb5e5fcc8743c7f0d0b0b73276f16a0af4132f6eeddfb9f1d55088dbc5b276cd`. Categories remain straightforward 8/0, missing/paraphrase 8/5, ambiguity/conflict 8/6, urgency policy 8/5, and unsupported/adversarial 8/4 (development/held-out). These are hand-authored synthetic cases, not customer records. The labels received bounded AI-assisted review, not independent human validation.
+
+The actual exported production prompt and contract were used without modification: prompt hash `c95a8c1fbf4eae6ada2378d8e5ae7b23eef30f54fefccf1b3e2ceb688ba1b417`, request/validator hash `dddab8c7381379484225199bb868976ce599f0488c1cea1b8cccdbaf2dfbf5b7`. Provider is NVIDIA NIM, model `openai/gpt-oss-20b`, temperature 0, max tokens 180, reasoning effort low, JSON-object response, timeout 18,000 ms, concurrency 1, no retries. Experiment ID: `50a029bdd95e42e753fd8a3be2af17f07ebb21d4c3eeb70611a55674ea37d321`; run ID: `baseline-v2-development`.
+
+Three v2 requests were reserved and settled: S001, S002, and S003 all timed out (18,032 ms, 18,005 ms, and 18,008 ms), with no HTTP response or token usage. Thus availability is 0/3; schema validity and semantic correctness are unavailable (0 HTTP 2xx and 0 usable responses); overall success is 0/3. There are 0 unknown outcomes. Cost is unavailable. The circuit breaker opened after the third consecutive provider timeout. Credential-free DNS/TLS diagnostics connected successfully with authorized TLS 1.3; this does not explain inference latency and is not provider availability evidence. No auth/configuration error was observed. The retained [v2 ledger](ai-evaluation-runs/baseline-v2-development.jsonl) and [generated v2 results](milestone-2a-results-v2.md) contain the reproducible evidence.
+
+The milestone-wide count is 16 actual provider requests (the preserved 13 v1 observations plus these 3 v2 requests), with no uncertain reservations; 134 of the 150-call budget remain. The remaining 37 development cases were not sent after the breaker opened; all 20 held-out cases remain unattempted. Held-out work must wait for every development case to have a settled outcome. Do not use `--ack-circuit-reset` without first diagnosing a transient service problem; if used, it applies only to unreserved cases and never retries timed-out IDs. No candidate prompt was created. The deterministic guided-demo stub was not used as evidence.
+
+### Verification and handoff
+
+- `node scripts/ai-evaluation-v2.mjs validate` — passed; frozen v2 counts and hashes verified.
+- `npm run test:evaluation` — passed, including 17 v2 evaluator tests, 2 container-wrapper synchronization tests, and the original v1 evaluator tests. No live calls were made by these tests.
+- `./scripts/verify_phase3.sh` — passed: 197 backend tests (2 dependency deprecation warnings), lint, 33 browser tests, 48 workflow tests, syntax/JSON/Compose checks, and tracked-secret scan. Live runtime scenarios remain skipped by that verifier.
+- `bash -n scripts/ai-evaluation-via-n8n.sh`, Node syntax checks, and `git diff --check` — passed. The guided browser demo was not rerun because application/workflow behavior did not change.
+
+Two read-only GPT-6 Luna Medium reviewers were used. The ledger reviewer identified missing compatibility/record checks, post-request-only accounting, raceable cap logic, and unsafe wrapper synchronization; all are addressed and tested. The rubric reviewer confirmed the S001/M002 inconsistency, identified the U004 policy ambiguity and regex context failures; these are documented in the versioned v2 protocol while v1 evidence remains intact. No recursive delegation was used.
+
+Exact commands:
+
+```bash
+node scripts/ai-evaluation-v2.mjs validate
+npm run test:evaluation
+bash scripts/ai-evaluation-via-n8n.sh run --split development --run-id baseline-v2-development
+# Only after diagnosing a transient provider failure:
+bash scripts/ai-evaluation-via-n8n.sh run --split development --run-id baseline-v2-development --ack-circuit-reset
+# Held-out is valid only after all 40 development cases have settled:
+bash scripts/ai-evaluation-via-n8n.sh run --split held_out --run-id baseline-v2-held_out
+node scripts/ai-evaluation-v2.mjs report
+./scripts/verify_phase3.sh
+```
+
+Recommendation for Milestone 2B remains an audited operator review/correction flow that preserves original output, reviewer identity/time, and versioned correction reasons, without treating extraction as booking or availability confirmation. No production accuracy, ROI, or human validation is claimed. The held-out score is not available; the current provider run is incomplete.
+
+The remainder of this document records the original v1 delivery and result narrative as historical context.
+
 ## Status
 
 **Partial.** The offline evaluator, frozen synthetic dataset, rubric, CI checks, and report are complete. The real NVIDIA baseline is incomplete because repeated requests exceeded the workflow's 18-second timeout. Thirteen development cases were attempted; the remaining 27 development cases and all 20 held-out cases were not sent. Held-out data was not used for tuning.
