@@ -17,7 +17,9 @@ Open **http://localhost:28000/demo.html**. The page runs five synthetic journeys
 dedicated n8n instance, FastAPI, PostgreSQL, and the local HighLevel contract simulator:
 normal intake, equivalent replay, AI timeout fallback, CRM 429 recovery, and a remote commit
 whose acknowledgement is lost. Each result is checked against database and simulator state,
-not inferred from a frontend timer or a green workflow alone.
+not inferred from a frontend timer or a green workflow alone. The page obtains a same-origin,
+HttpOnly demo session; scenario writes require its derived CSRF token and never expose the
+simulator's internal control key.
 
 ```bash
 npm ci                         # only needed for automated browser verification
@@ -28,8 +30,10 @@ npm run test:demo              # real headless-Chrome journey through all five s
 The stack uses separate named volumes, generated ignored secrets, and loopback ports
 `25678`, `28000`, `28025`, and `28080`; it does not reuse or reset the preserved development
 runtime. The AI endpoint is an explicitly labeled deterministic test provider. CRM faults are
-local, one-shot, and scoped to the selected submission. Appointments remain local, and email
-remains inside Mailpit. See the [three-minute and deeper walkthrough](docs/guided-demo.md).
+local, one-shot, and isolated by submission, including overlapping tabs. Retained n8n volumes
+refresh tracked workflows when their source digest changes, and readiness confirms the required
+webhooks are registered. Appointments remain local, and email remains inside Mailpit. See the
+[three-minute and deeper walkthrough](docs/guided-demo.md).
 
 ![Guided reliability demo](docs/assets/demo/guided-demo-overview.png)
 

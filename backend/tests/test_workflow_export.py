@@ -1,9 +1,11 @@
 import json
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 def test_sanitized_workflow_has_required_safety_controls():
-    export_path = Path(__file__).resolve().parents[2] / "n8n" / "lead-intake.json"
+    export_path = REPO_ROOT / "n8n" / "lead-intake.json"
     workflow = json.loads(export_path.read_text())
     serialized = json.dumps(workflow)
     nodes = {node["name"]: node for node in workflow["nodes"]}
@@ -40,7 +42,7 @@ def test_sanitized_workflow_has_required_safety_controls():
 
 
 def test_phase_two_workflows_are_sanitized_and_use_semantic_boundaries():
-    export_dir = Path(__file__).resolve().parents[2] / "n8n"
+    export_dir = REPO_ROOT / "n8n"
     booking = json.loads((export_dir / "appointment-booking.json").read_text())
     follow_up = json.loads((export_dir / "follow-up-dispatch.json").read_text())
 
@@ -65,3 +67,15 @@ def test_phase_two_workflows_are_sanitized_and_use_semantic_boundaries():
     assert "follow-ups/due" in follow_up_nodes["Fetch Due Pending Follow-ups"]["parameters"][
         "url"
     ]
+
+
+def test_demo_n8n_entrypoint_refreshes_changed_exports_and_republishes_every_start():
+    script = (REPO_ROOT / "scripts" / "demo_n8n_entrypoint.sh").read_text()
+
+    assert "sha256sum /demo/workflows/*.json" in script
+    assert 'installed_manifest=$(cat "$marker"' in script
+    assert 'if [ "$installed_manifest" != "$workflow_manifest" ]' in script
+    assert "n8n import:workflow --separate --input=/demo/workflows" in script
+    assert script.index("n8n import:workflow") < script.index("n8n publish:workflow")
+    assert script.index("n8n publish:workflow") > script.index("fi\n")
+    assert script.rstrip().endswith("exec n8n start")

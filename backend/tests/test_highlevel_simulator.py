@@ -254,6 +254,96 @@ def test_fault_can_be_scoped_to_one_submission_and_target_path(simulator):
     assert create_contact(simulator, target_body).status_code == 200
 
 
+def test_scoped_faults_for_overlapping_submissions_do_not_overwrite(simulator):
+    rate_limited_submission = str(uuid.uuid4())
+    lost_ack_submission = str(uuid.uuid4())
+    rate_limited_body = contact_body(
+        email="overlap-rate-limit@example.com",
+        phone="+16045550179",
+        customFields=[
+            {
+                "id": "sim_cf_submission_id",
+                "fieldValue": rate_limited_submission,
+            },
+            {"id": "sim_cf_correlation_id", "fieldValue": str(uuid.uuid4())},
+        ],
+    )
+    unrelated_body = contact_body(
+        email="overlap-unrelated@example.com",
+        phone="+16045550180",
+    )
+    lost_ack_body = contact_body(
+        email="overlap-lost-ack@example.com",
+        phone="+16045550181",
+        customFields=[
+            {"id": "sim_cf_submission_id", "fieldValue": lost_ack_submission},
+            {"id": "sim_cf_correlation_id", "fieldValue": str(uuid.uuid4())},
+        ],
+    )
+
+    simulator.post(
+        "/simulator/api/fault",
+        json={
+            "mode": "rate_limited",
+            "retry_after": 4,
+            "submission_id": rate_limited_submission,
+            "target_path": "/contacts/upsert",
+        },
+    )
+    simulator.post(
+        "/simulator/api/fault",
+        json={
+            "mode": "lost_acknowledgement",
+            "retry_after": 1,
+            "submission_id": lost_ack_submission,
+            "target_path": "/opportunities/",
+        },
+    )
+
+    assert create_contact(simulator, unrelated_body).status_code == 200
+    rejected = create_contact(simulator, rate_limited_body)
+    assert rejected.status_code == 429
+    assert rejected.headers["Retry-After"] == "4"
+    assert create_contact(simulator, rate_limited_body).status_code == 200
+    snapshot = simulator.get("/simulator/api/state").json()
+    assert snapshot["faults"] == [
+        {
+            "mode": "lost_acknowledgement",
+            "retry_after": 1,
+            "submission_id": lost_ack_submission,
+            "target_path": "/opportunities/",
+        }
+    ]
+    lost_ack_contact = create_contact(simulator, lost_ack_body).json()["contact"]
+    with pytest.raises(httpx.ReadTimeout):
+        simulator.post(
+            "/opportunities/",
+            headers=headers(),
+            json={
+                "pipelineId": "sim_pipeline_hvac",
+                "locationId": "sim_location_reference",
+                "name": "Overlapping lost acknowledgement",
+                "pipelineStageId": "sim_stage_new_lead",
+                "status": "open",
+                "contactId": lost_ack_contact["id"],
+                "customFields": [
+                    {
+                        "id": "sim_of_submission_id",
+                        "fieldValue": lost_ack_submission,
+                    }
+                ],
+            },
+            timeout=0.001,
+        )
+    time.sleep(0.05)
+    final_snapshot = simulator.get("/simulator/api/state").json()
+    assert final_snapshot["faults"] == []
+    assert sum(
+        opportunity["customFields"][0]["value"] == lost_ack_submission
+        for opportunity in final_snapshot["opportunities"]
+    ) == 1
+
+
 def test_lost_acknowledgement_commits_before_client_timeout(simulator):
     body = contact_body()
     submission_id = body["customFields"][0]["fieldValue"]

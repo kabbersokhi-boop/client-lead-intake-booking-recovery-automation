@@ -39,6 +39,7 @@ services:
       DEMO_SIMULATOR_CONTROL_URL: http://highlevel-simulator:8080
       DEMO_AI_BASE_URL: http://demo-ai:8081
       DEMO_MAILPIT_BASE_URL: http://mailpit:8025
+      DEMO_ALLOWED_ORIGINS: http://localhost:28000,http://127.0.0.1:28000
       DEMO_CONTROL_KEY: ${DEMO_CONTROL_KEY}
     depends_on:
       postgres:

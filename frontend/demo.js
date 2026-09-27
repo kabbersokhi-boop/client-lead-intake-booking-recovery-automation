@@ -6,12 +6,36 @@ const verdict = document.querySelector("#scenario-verdict");
 const explanation = document.querySelector("#scenario-explanation");
 const timeline = document.querySelector("#scenario-timeline");
 const evidence = document.querySelector("#scenario-evidence");
+let csrfToken = null;
+let demoReady = false;
+let scenarioRunning = false;
+
+function updateScenarioButtons() {
+  document.querySelectorAll(".scenario button").forEach((button) => {
+    button.disabled = !demoReady || scenarioRunning || !csrfToken;
+  });
+}
+
+async function loadSession() {
+  const response = await fetch("/api/demo/session", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "X-Demo-Bootstrap": "guided-demo" },
+  });
+  const body = await response.json();
+  if (!response.ok || typeof body.csrf_token !== "string") {
+    throw new Error(body.detail || "Demo session could not be established");
+  }
+  csrfToken = body.csrf_token;
+  updateScenarioButtons();
+}
 
 async function loadReadiness() {
   try {
     const response = await fetch("/api/demo/readiness");
     const body = await response.json();
     if (!response.ok) throw new Error(body.detail || "Readiness check failed");
+    demoReady = body.ready;
     readinessTitle.textContent = body.ready ? "All demo boundaries are ready" : "The demo stack is not ready";
     readinessChecks.replaceChildren(...Object.entries(body.checks).map(([name, check]) => {
       const item = document.createElement("span");
@@ -19,11 +43,12 @@ async function loadReadiness() {
       item.textContent = `${check.ready ? "✓" : "×"} ${name}`;
       return item;
     }));
-    document.querySelectorAll(".scenario button").forEach((button) => { button.disabled = !body.ready; });
+    updateScenarioButtons();
     if (!body.ready) window.setTimeout(loadReadiness, 2000);
   } catch (error) {
+    demoReady = false;
     readinessTitle.textContent = error.message;
-    document.querySelectorAll(".scenario button").forEach((button) => { button.disabled = true; });
+    updateScenarioButtons();
     window.setTimeout(loadReadiness, 2000);
   }
 }
@@ -54,12 +79,18 @@ function renderScenario(body, card) {
 document.querySelectorAll(".scenario").forEach((card) => {
   const button = card.querySelector("button");
   button.addEventListener("click", async () => {
+    if (scenarioRunning) return;
+    scenarioRunning = true;
     document.querySelectorAll(".scenario").forEach((item) => item.classList.remove("running", "passed", "failed"));
     card.classList.add("running");
-    button.disabled = true;
+    updateScenarioButtons();
     result.hidden = true;
     try {
-      const response = await fetch(`/api/demo/scenarios/${card.dataset.scenario}`, { method: "POST" });
+      const response = await fetch(`/api/demo/scenarios/${card.dataset.scenario}`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "X-Demo-CSRF": csrfToken },
+      });
       const body = await response.json();
       if (!response.ok) throw new Error(body.detail || "Scenario failed to execute");
       renderScenario(body, card);
@@ -72,9 +103,22 @@ document.querySelectorAll(".scenario").forEach((card) => {
       explanation.textContent = error.message;
       timeline.replaceChildren(); evidence.textContent = "";
     } finally {
-      card.classList.remove("running"); button.disabled = false;
+      card.classList.remove("running");
+      scenarioRunning = false;
+      updateScenarioButtons();
     }
   });
 });
 
-loadReadiness();
+async function startDemo() {
+  try {
+    await loadSession();
+    await loadReadiness();
+  } catch (error) {
+    demoReady = false;
+    readinessTitle.textContent = error.message;
+    updateScenarioButtons();
+  }
+}
+
+startDemo();

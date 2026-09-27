@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     demo_simulator_control_url: str = "http://highlevel-simulator:8080"
     demo_ai_base_url: str = "http://demo-ai:8081"
     demo_mailpit_base_url: str = "http://mailpit:8025"
+    demo_allowed_origins: str = (
+        "http://localhost:28000,http://127.0.0.1:28000"
+    )
+    demo_session_ttl_seconds: int = 14_400
     demo_control_key: SecretStr | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

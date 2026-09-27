@@ -46,6 +46,7 @@ const lead = {
   original_message: "  Furnace not heating. ",
   normalized_message: "Furnace not heating.",
 };
+const submissionFingerprint = "a".repeat(64);
 
 test("exported validation code rejects wrong types and punctuation-only phone", () => {
   const wrongType = runCode("Validate Required Fields", { body: JSON.stringify({ ...lead, message: lead.original_message, email: 123 }) })[0].json;
@@ -159,6 +160,7 @@ test("intake acknowledgement separates created and replayed lifecycle invariants
     crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",
     submission_id: lead.submission_id,
     correlation_id: lead.correlation_id,
+    submission_fingerprint: submissionFingerprint,
     ai_status: "enriched",
     pipeline_stage: "new_lead",
     follow_up_status: "pending",
@@ -207,6 +209,7 @@ test("intake replay trusts persisted AI state and permits a legacy missing follo
       crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",
       submission_id: lead.submission_id,
       correlation_id: lead.correlation_id,
+      submission_fingerprint: submissionFingerprint,
       intake_state: "replayed",
       ai_status: "fallback_invalid",
       pipeline_stage: "new_lead",
@@ -225,6 +228,7 @@ test("intake creation acknowledges the canonical stored AI payload", () => {
       crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",
       submission_id: lead.submission_id,
       correlation_id: lead.correlation_id,
+      submission_fingerprint: submissionFingerprint,
       intake_state: "created",
       ai_status: "enriched",
       pipeline_stage: "new_lead",
@@ -242,12 +246,32 @@ test("intake replay rejects lifecycle combinations the browser rejects", () => {
     crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",
     submission_id: lead.submission_id,
     correlation_id: lead.correlation_id,
+    submission_fingerprint: submissionFingerprint,
     intake_state: "replayed",
     ai_status: "enriched",
     follow_up_due_at: "2026-09-19T00:02:00Z",
   };
   assert.equal(buildIntakeResult({ ...base, pipeline_stage: "new_lead", follow_up_status: "sent" }).status_code, 502);
   assert.equal(buildIntakeResult({ ...base, pipeline_stage: "new_lead", follow_up_status: "cancelled" }).status_code, 502);
+});
+
+test("intake acknowledgement binds successful results to the submission fingerprint", () => {
+  const base = {
+    crm_lead_id: "d678189e-db40-46d7-89a5-4bca74dded23",
+    submission_id: lead.submission_id,
+    correlation_id: lead.correlation_id,
+    submission_fingerprint: submissionFingerprint,
+    intake_state: "created",
+    ai_status: "enriched",
+    pipeline_stage: "new_lead",
+    follow_up_status: "pending",
+    follow_up_due_at: "2026-09-19T00:02:00Z",
+  };
+  const accepted = buildIntakeResult(base);
+  assert.equal(accepted.status_code, 201);
+  assert.equal(accepted.response_body.submission_fingerprint, submissionFingerprint);
+  assert.equal(buildIntakeResult({ ...base, submission_fingerprint: undefined }).status_code, 502);
+  assert.equal(buildIntakeResult({ ...base, submission_fingerprint: "b".repeat(63) }).status_code, 502);
 });
 
 const bookingWorkflow = require("../appointment-booking.json");

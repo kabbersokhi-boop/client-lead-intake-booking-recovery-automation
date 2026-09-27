@@ -86,12 +86,19 @@ class SimulatorState:
         self.opportunities: dict[str, dict[str, Any]] = {}
         self.appointments: dict[str, dict[str, Any]] = {}
         self.events: list[dict[str, Any]] = []
-        self.fault = {
+        self.faults: dict[tuple[str | None, str | None], dict[str, Any]] = {}
+
+    @staticmethod
+    def normal_fault() -> dict[str, Any]:
+        return {
             "mode": "normal",
             "retry_after": 5,
             "submission_id": None,
             "target_path": None,
         }
+
+    def fault_snapshot(self) -> dict[str, Any]:
+        return dict(next(iter(self.faults.values()), self.normal_fault()))
 
     def reset(self) -> None:
         with self.lock:
@@ -99,12 +106,7 @@ class SimulatorState:
             self.opportunities.clear()
             self.appointments.clear()
             self.events.clear()
-            self.fault = {
-                "mode": "normal",
-                "retry_after": 5,
-                "submission_id": None,
-                "target_path": None,
-            }
+            self.faults.clear()
 
     def arm_fault(
         self,
@@ -114,39 +116,34 @@ class SimulatorState:
         target_path: str | None = None,
     ) -> dict[str, Any]:
         with self.lock:
-            self.fault = {
+            key = (submission_id, target_path)
+            if mode == "normal":
+                if key == (None, None):
+                    self.faults.clear()
+                else:
+                    self.faults.pop(key, None)
+                return self.normal_fault()
+            armed = {
                 "mode": mode,
                 "retry_after": retry_after,
                 "submission_id": submission_id,
                 "target_path": target_path,
             }
-            return dict(self.fault)
+            self.faults[key] = armed
+            return dict(armed)
 
     def consume_fault(self, path: str, submission_id: str | None) -> dict[str, Any]:
         with self.lock:
-            armed = dict(self.fault)
-            matches = (
-                armed["mode"] != "normal"
-                and (armed["target_path"] is None or armed["target_path"] == path)
-                and (
-                    armed["submission_id"] is None
-                    or armed["submission_id"] == submission_id
-                )
-            )
-            if not matches:
-                return {
-                    "mode": "normal",
-                    "retry_after": 5,
-                    "submission_id": None,
-                    "target_path": None,
-                }
-            self.fault = {
-                "mode": "normal",
-                "retry_after": 5,
-                "submission_id": None,
-                "target_path": None,
-            }
-            return armed
+            for key in (
+                (submission_id, path),
+                (submission_id, None),
+                (None, path),
+                (None, None),
+            ):
+                armed = self.faults.pop(key, None)
+                if armed is not None:
+                    return dict(armed)
+            return self.normal_fault()
 
     def record(
         self,
@@ -575,7 +572,8 @@ def simulator_state() -> dict[str, Any]:
             "opportunities": list(state.opportunities.values()),
             "appointments": list(state.appointments.values()),
             "events": list(state.events),
-            "fault": dict(state.fault),
+            "fault": state.fault_snapshot(),
+            "faults": [dict(item) for item in state.faults.values()],
         }
 
 

@@ -5,7 +5,8 @@
 This demo is a recruiter-facing path through the repository's real local application boundaries.
 The browser invokes published n8n webhooks. n8n invokes FastAPI. PostgreSQL owns the durable job
 and Lead state. The HighLevel adapter uses HTTP against the separate contract simulator. Result
-cards are built from observed PostgreSQL and simulator state.
+cards are built from observed PostgreSQL and simulator state. Same-origin browser sessions protect
+scenario writes; the internal simulator-control key never enters browser responses.
 
 It does not prove production traffic, external email delivery, model quality, HighLevel Calendar
 capacity, or universal exactly-once delivery. All identities and effects are synthetic.
@@ -28,7 +29,9 @@ cd client-lead-intake-booking-recovery-automation
 
 The command creates `.demo/runtime.env` with locally generated secrets at mode 0600, builds the
 stack, imports and publishes the required workflows, and waits for database, n8n, backend, model
-stub, and simulator readiness. The file is ignored by Git and secret values are not printed.
+stub, simulator, Mailpit, and both scenario-critical webhook registrations. On a retained n8n
+volume, a source digest triggers reimport only when tracked exports change; required workflows are
+republished on every start. The file is ignored by Git and secret values are not printed.
 
 Open:
 
@@ -53,7 +56,8 @@ volumes.
 
 ## Three-minute walkthrough
 
-1. Show the LOCAL / SYNTHETIC / NO EXTERNAL ACCOUNTS boundary and five green readiness checks.
+1. Show the LOCAL / SYNTHETIC / NO EXTERNAL ACCOUNTS boundary and all green readiness checks,
+   including lead-intake and recovery webhook registration.
 2. Run **Normal intake**. Point out HTTP 201 and the one Lead, Contact, and Opportunity counts.
 3. Run **Equivalent duplicate**. Point out the replayed HTTP 200 and unchanged one/one/one counts.
 4. Run **AI unavailable**. Point out `fallback_unavailable`: the valid enquiry was preserved and
@@ -70,22 +74,27 @@ volumes.
 Use a fresh run and narrate the boundaries rather than only the UI:
 
 1. `compose.demo.yml` uses dedicated volumes and loopback mappings. `scripts/demo_n8n_entrypoint.sh`
-   imports the tracked exports and publishes only customer/reliability workflows; diagnostic and
-   reporting exports remain unpublished.
+   compares a digest of the tracked exports on every retained-volume start, reimports changed
+   exports, and publishes only customer/reliability workflows; diagnostic and reporting exports
+   remain unpublished.
 2. The deterministic provider returns the same five-field extraction contract used by the normal
    intake workflow. A message marker makes only the selected synthetic AI call exceed n8n's
    configured timeout.
-3. Simulator fault control requires an internal key and is reachable by the guided backend only.
-   A fault includes the submission identity and target path, so another concurrent contract call
-   cannot accidentally consume it.
-4. The 429 case fails before the Contact write, persists the provider Retry-After on attempt 1,
-   and later completes on attempt 2.
-5. The lost-ack case commits the Opportunity and then delays the reply beyond the adapter timeout.
+3. The browser first obtains a same-origin session backed by an HttpOnly, SameSite cookie. Scenario
+   POSTs require the matching CSRF header and an explicitly allowed Origin. This is local anti-CSRF
+   protection, not production user authentication; a process already controlling the workstation
+   can impersonate a local browser. The backend alone holds the internal simulator-control key.
+4. Simulator faults are stored and atomically consumed by submission identity and target path, so
+   overlapping tabs retain independent faults. A tab disables all of its scenario buttons while a
+   run is active as a usability guard; server-side isolation is authoritative across tabs.
+5. The 429 case fails before the Contact write, persists the provider Retry-After and due time on
+   attempt 1, and proves attempt 2 did not start before either minimum.
+6. The lost-ack case commits the Opportunity and then delays the reply beyond the adapter timeout.
    Recovery searches by application identity, verifies the existing Contact and Opportunity, and
    completes without a second Opportunity POST.
-6. The browser E2E test observes each scenario response, asserts one Lead/Contact/Opportunity in
-   authoritative state, checks the rendered evidence, and captures the screenshots in
-   `docs/assets/demo/`.
+7. The browser E2E test independently asserts retry timestamps, persisted `needs_review`, duplicate
+   operation identity, one Lead/Contact/Opportunity, and a same-context overlapping 429/lost-ACK
+   run. It captures screenshots in `docs/assets/demo/`.
 
 Run deterministic and browser checks:
 

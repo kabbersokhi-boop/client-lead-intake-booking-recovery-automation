@@ -1,10 +1,13 @@
+import hashlib
+import hmac
+import secrets
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -17,6 +20,74 @@ router = APIRouter(prefix="/api/demo", tags=["isolated-demo"])
 Scenario = Literal[
     "normal", "duplicate", "ai_unavailable", "rate_limit", "lost_acknowledgement"
 ]
+DEMO_SESSION_COOKIE = "hvac_guided_demo_session"
+N8N_REQUIRED_WEBHOOKS = {
+    "n8n lead intake webhook": "lead-intake",
+    "n8n recovery webhook": "crm-write-recovery-dispatch",
+}
+
+
+def _allowed_origins() -> set[str]:
+    return {
+        origin.strip().rstrip("/")
+        for origin in settings.demo_allowed_origins.split(",")
+        if origin.strip()
+    }
+
+
+def _require_allowed_origin(request: Request) -> None:
+    origin = request.headers.get("Origin", "").rstrip("/")
+    if origin not in _allowed_origins():
+        raise HTTPException(status_code=403, detail="Trusted demo origin required")
+
+
+def _session_token(session_id: str) -> str:
+    key = settings.demo_control_key.get_secret_value().encode()
+    return hmac.new(key, f"demo-session:{session_id}".encode(), hashlib.sha256).hexdigest()
+
+
+def _session_is_fresh(session_id: str) -> bool:
+    try:
+        issued_at_text, nonce = session_id.split(".", 1)
+        issued_at = int(issued_at_text)
+    except (TypeError, ValueError):
+        return False
+    age = int(time.time()) - issued_at
+    return len(nonce) >= 32 and 0 <= age <= settings.demo_session_ttl_seconds
+
+
+def _require_demo_session(request: Request) -> None:
+    _require_allowed_origin(request)
+    session_id = request.cookies.get(DEMO_SESSION_COOKIE, "")
+    presented = request.headers.get("X-Demo-CSRF", "")
+    if not _session_is_fresh(session_id) or not hmac.compare_digest(
+        presented, _session_token(session_id)
+    ):
+        raise HTTPException(status_code=403, detail="Valid demo session required")
+
+
+@router.post("/session")
+def create_demo_session(request: Request, response: Response) -> dict:
+    _require_allowed_origin(request)
+    if request.headers.get("X-Demo-Bootstrap") != "guided-demo":
+        raise HTTPException(status_code=403, detail="Demo bootstrap header required")
+    session_id = request.cookies.get(DEMO_SESSION_COOKIE, "")
+    if not _session_is_fresh(session_id):
+        session_id = f"{int(time.time())}.{secrets.token_urlsafe(32)}"
+    response.set_cookie(
+        DEMO_SESSION_COOKIE,
+        session_id,
+        max_age=settings.demo_session_ttl_seconds,
+        httponly=True,
+        samesite="strict",
+        secure=False,
+        path="/api/demo",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "csrf_token": _session_token(session_id),
+        "expires_in_seconds": settings.demo_session_ttl_seconds,
+    }
 
 
 def _custom_value(record: dict, field_id: str) -> str | None:
@@ -30,11 +101,21 @@ def _client() -> httpx.Client:
     return httpx.Client(timeout=20, trust_env=False)
 
 
+def _registered_post_webhook(response: httpx.Response) -> bool:
+    if response.status_code != 404:
+        return False
+    try:
+        message = response.json().get("message", "")
+    except ValueError:
+        return False
+    return "not registered for GET requests" in message
+
+
 def _readiness() -> dict:
     checks: dict[str, dict] = {}
     with _client() as client:
         for name, url in {
-            "n8n": f"{settings.demo_n8n_base_url}/healthz",
+            "n8n process": f"{settings.demo_n8n_base_url}/healthz",
             "simulator": f"{settings.demo_simulator_control_url}/health",
             "deterministic AI": f"{settings.demo_ai_base_url}/health",
             "Mailpit": f"{settings.demo_mailpit_base_url}/livez",
@@ -44,6 +125,17 @@ def _readiness() -> dict:
                 checks[name] = {
                     "ready": response.status_code == 200,
                     "status": response.status_code,
+                }
+            except httpx.HTTPError as error:
+                checks[name] = {"ready": False, "error": type(error).__name__}
+        for name, path in N8N_REQUIRED_WEBHOOKS.items():
+            try:
+                response = client.get(f"{settings.demo_n8n_base_url}/webhook/{path}")
+                checks[name] = {
+                    "ready": _registered_post_webhook(response),
+                    "status": response.status_code,
+                    "method": "POST",
+                    "path": path,
                 }
             except httpx.HTTPError as error:
                 checks[name] = {"ready": False, "error": type(error).__name__}
@@ -62,9 +154,9 @@ def readiness(db: Session = Depends(get_db)) -> dict:
     }
 
 
-def _arm_fault(client: httpx.Client, scenario: Scenario, submission_id: uuid.UUID) -> None:
+def _arm_fault(client: httpx.Client, scenario: Scenario, submission_id: uuid.UUID) -> bool:
     if scenario not in {"rate_limit", "lost_acknowledgement"}:
-        return
+        return False
     mode = "rate_limited" if scenario == "rate_limit" else "lost_acknowledgement"
     target = "/contacts/upsert" if scenario == "rate_limit" else "/opportunities/"
     response = client.post(
@@ -72,6 +164,22 @@ def _arm_fault(client: httpx.Client, scenario: Scenario, submission_id: uuid.UUI
         headers={"X-Demo-Control-Key": settings.demo_control_key.get_secret_value()},
         json={
             "mode": mode,
+            "retry_after": 2,
+            "submission_id": str(submission_id),
+            "target_path": target,
+        },
+    )
+    response.raise_for_status()
+    return True
+
+
+def _clear_fault(client: httpx.Client, scenario: Scenario, submission_id: uuid.UUID) -> None:
+    target = "/contacts/upsert" if scenario == "rate_limit" else "/opportunities/"
+    response = client.post(
+        f"{settings.demo_simulator_control_url}/simulator/api/fault",
+        headers={"X-Demo-Control-Key": settings.demo_control_key.get_secret_value()},
+        json={
+            "mode": "normal",
             "retry_after": 2,
             "submission_id": str(submission_id),
             "target_path": target,
@@ -122,7 +230,144 @@ def _recover_until_terminal(
     return job
 
 
-@router.post("/scenarios/{scenario}")
+def _aware(value: datetime | None) -> datetime | None:
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _iso(value: datetime | None) -> str | None:
+    aware = _aware(value)
+    return aware.isoformat() if aware is not None else None
+
+
+def _operation_identity(body: dict | None) -> dict[str, str] | None:
+    if not isinstance(body, dict):
+        return None
+    fields = (
+        "crm_lead_id",
+        "submission_id",
+        "correlation_id",
+        "submission_fingerprint",
+    )
+    identity = {field: body.get(field) for field in fields}
+    if not all(isinstance(value, str) and value for value in identity.values()):
+        return None
+    return identity
+
+
+def _retry_timing(attempts: list[CRMWriteAttempt], due_at: datetime | None) -> dict:
+    evidence = {
+        "failed_attempt_finished_at": None,
+        "scheduled_retry_at": _iso(due_at),
+        "next_attempt_started_at": None,
+        "required_delay_seconds": None,
+        "scheduled_delay_seconds": None,
+        "observed_delay_seconds": None,
+        "honored": False,
+    }
+    if len(attempts) < 2:
+        return evidence
+    failed_at = _aware(attempts[0].finished_at)
+    next_started_at = _aware(attempts[1].started_at)
+    scheduled_at = _aware(due_at)
+    required = attempts[0].retry_after_seconds
+    evidence.update(
+        {
+            "failed_attempt_finished_at": _iso(failed_at),
+            "next_attempt_started_at": _iso(next_started_at),
+            "required_delay_seconds": required,
+        }
+    )
+    if failed_at is None or next_started_at is None or scheduled_at is None or required is None:
+        return evidence
+    scheduled_delay = (scheduled_at - failed_at).total_seconds()
+    observed_delay = (next_started_at - failed_at).total_seconds()
+    evidence.update(
+        {
+            "scheduled_delay_seconds": round(scheduled_delay, 6),
+            "observed_delay_seconds": round(observed_delay, 6),
+            "honored": (
+                scheduled_delay >= required
+                and next_started_at >= scheduled_at
+                and observed_delay >= required
+            ),
+        }
+    )
+    return evidence
+
+
+def _scenario_proof(
+    scenario: Scenario,
+    *,
+    initial_status: int,
+    initial_job_state: str,
+    initial_body: dict,
+    replay_status: int | None,
+    replay_body: dict | None,
+    lead: Lead | None,
+    attempts: list[CRMWriteAttempt],
+    due_at: datetime | None,
+    opportunity_posts: list[dict],
+) -> tuple[dict[str, bool], dict]:
+    initial_identity = _operation_identity(initial_body)
+    replay_identity = _operation_identity(replay_body)
+    retry_timing = _retry_timing(attempts, due_at)
+    proof = {
+        "normal": {
+            "created_response": initial_status == 201,
+            "completed_during_intake": initial_job_state == "completed",
+        },
+        "duplicate": {
+            "created_then_replayed": (
+                initial_status == 201
+                and replay_status == 200
+                and replay_body is not None
+                and replay_body.get("intake_state") == "replayed"
+            ),
+            "same_original_operation": (
+                initial_identity is not None
+                and replay_identity is not None
+                and initial_identity == replay_identity
+            ),
+        },
+        "ai_unavailable": {
+            "request_preserved": initial_status == 201,
+            "fallback_persisted": lead is not None
+            and lead.ai_status == "fallback_unavailable",
+            "human_review_persisted": lead is not None and lead.needs_review is True,
+        },
+        "rate_limit": {
+            "queued_after_429": initial_status == 202
+            and initial_job_state == "retry_wait",
+            "retry_after_recorded": (
+                len(attempts) >= 2
+                and attempts[0].status_code == 429
+                and attempts[0].error_class == "highlevel_rate_limited"
+                and attempts[0].retry_after_seconds == 2
+            ),
+            "retry_after_honored": retry_timing["honored"] is True,
+            "later_attempt_completed": len(attempts) >= 2
+            and attempts[-1].outcome == "completed",
+        },
+        "lost_acknowledgement": {
+            "queued_after_timeout": initial_status == 202
+            and initial_job_state == "retry_wait",
+            "timeout_recorded": any(
+                item.error_class == "highlevel_timeout" for item in attempts
+            ),
+            "one_remote_commit": len(opportunity_posts) == 1
+            and opportunity_posts[0].get("status") == 201,
+        },
+    }[scenario]
+    return proof, {
+        "initial_operation_identity": initial_identity,
+        "replay_operation_identity": replay_identity,
+        "retry_timing": retry_timing,
+    }
+
+
+@router.post("/scenarios/{scenario}", dependencies=[Depends(_require_demo_session)])
 def run_scenario(scenario: Scenario, db: Session = Depends(get_db)) -> dict:
     submission_id = uuid.uuid4()
     correlation_id = uuid.uuid4()
@@ -139,8 +384,12 @@ def run_scenario(scenario: Scenario, db: Session = Depends(get_db)) -> dict:
         ),
     }
     with _client() as client:
-        _arm_fault(client, scenario, submission_id)
-        initial_status, initial_body = _post_intake(client, payload)
+        fault_armed = _arm_fault(client, scenario, submission_id)
+        try:
+            initial_status, initial_body = _post_intake(client, payload)
+        finally:
+            if fault_armed:
+                _clear_fault(client, scenario, submission_id)
         replay_status = None
         replay_body = None
         if scenario == "duplicate":
@@ -184,39 +433,28 @@ def run_scenario(scenario: Scenario, db: Session = Depends(get_db)) -> dict:
         for item in simulator.get("events", [])
         if item.get("submissionReference") == str(submission_id)
     ]
-    ai_status = db.scalar(select(Lead.ai_status).where(Lead.submission_id == submission_id))
+    lead = db.scalar(select(Lead).where(Lead.submission_id == submission_id))
+    ai_status = lead.ai_status if lead else None
+    needs_review = lead.needs_review if lead else None
     expected_ai = "fallback_unavailable" if scenario == "ai_unavailable" else "enriched"
     opportunity_posts = [
         item
         for item in matching_events
         if item.get("method") == "POST" and item.get("path") == "/opportunities/"
     ]
-    scenario_verified = {
-        "normal": initial_status == 201 and initial_job_state == "completed",
-        "duplicate": (
-            initial_status == 201
-            and replay_status == 200
-            and replay_body is not None
-            and replay_body.get("intake_state") == "replayed"
-        ),
-        "ai_unavailable": initial_status == 201 and ai_status == "fallback_unavailable",
-        "rate_limit": (
-            initial_status == 202
-            and initial_job_state == "retry_wait"
-            and len(attempts) >= 2
-            and attempts[0].status_code == 429
-            and attempts[0].error_class == "highlevel_rate_limited"
-            and attempts[0].retry_after_seconds == 2
-            and attempts[-1].outcome == "completed"
-        ),
-        "lost_acknowledgement": (
-            initial_status == 202
-            and initial_job_state == "retry_wait"
-            and any(item.error_class == "highlevel_timeout" for item in attempts)
-            and len(opportunity_posts) == 1
-            and opportunity_posts[0].get("status") == 201
-        ),
-    }[scenario]
+    scenario_proof, scenario_details = _scenario_proof(
+        scenario,
+        initial_status=initial_status,
+        initial_job_state=initial_job_state,
+        initial_body=initial_body,
+        replay_status=replay_status,
+        replay_body=replay_body,
+        lead=lead,
+        attempts=attempts,
+        due_at=job.due_at,
+        opportunity_posts=opportunity_posts,
+    )
+    scenario_verified = all(scenario_proof.values())
     verified = (
         job.state == "completed"
         and lead_count == 1
@@ -269,6 +507,7 @@ def run_scenario(scenario: Scenario, db: Session = Depends(get_db)) -> dict:
             "operation_kind": job.operation_kind,
             "payload_fingerprint": job.payload_fingerprint,
             "source_execution_reference": job.source_execution_reference,
+            "scenario_proof": scenario_proof,
             "initial_http_status": initial_status,
             "initial_intake_state": initial_body.get("intake_state"),
             "initial_job_state": initial_job_state,
@@ -277,6 +516,8 @@ def run_scenario(scenario: Scenario, db: Session = Depends(get_db)) -> dict:
                 {
                     "attempt_id": str(item.id),
                     "number": item.attempt_number,
+                    "started_at": _iso(item.started_at),
+                    "finished_at": _iso(item.finished_at),
                     "outcome": item.outcome,
                     "status_code": item.status_code,
                     "error_class": item.error_class,
@@ -286,6 +527,7 @@ def run_scenario(scenario: Scenario, db: Session = Depends(get_db)) -> dict:
                 for item in attempts
             ],
             "ai_status": ai_status,
+            "needs_review": needs_review,
             "lead_count": lead_count,
             "contact_count": len(contacts),
             "opportunity_count": len(opportunities),
@@ -300,5 +542,6 @@ def run_scenario(scenario: Scenario, db: Session = Depends(get_db)) -> dict:
             ],
             "replay_http_status": replay_status,
             "replay_intake_state": replay_body.get("intake_state") if replay_body else None,
+            **scenario_details,
         },
     }
