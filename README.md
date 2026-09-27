@@ -169,7 +169,7 @@ Destination inspection mattered. One green Make execution selected the existing 
 
 ## Verification and system boundaries
 
-The synthetic AI extraction measurements, frozen dataset, rubric, and limitations are documented in the [Milestone 2A evaluation report](docs/reviews/milestone-2a-report.md).
+The synthetic AI extraction measurements, frozen dataset, rubric, and limitations are documented in the [Milestone 2A evaluation report](docs/reviews/milestone-2a-report.md), with separate [historical v1 results](docs/reviews/milestone-2a-results.md) and [corrected v2 results](docs/reviews/milestone-2a-results-v2.md).
 
 The repository's deterministic checks cover API contracts, PostgreSQL persistence and migrations, concurrent booking/follow-up and recovery claims, stage-sync supersession and lease expiry, retry timing and quota behavior, credential pauses, lost acknowledgements, HighLevel foreign/ambiguous identity handling, malformed upstream success, simulator faults, replay conflicts, reporting and daylight-saving-aware date windows, PII minimization, browser response validation, Operations redaction, and n8n Code-node logic. The full local verifier passed **187 Python tests** with disposable PostgreSQL, **33 browser/helper tests**, **47 n8n workflow tests**, and Ruff. GitHub Actions runs those suites on push and pull request; live external services are outside that CI gate.
 
