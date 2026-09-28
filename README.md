@@ -55,6 +55,18 @@ flowchart LR
 
 *The intake workflow separates input validation, AI extraction, schema validation, durable persistence, and response verification.*
 
+## GoHighLevel CRM integration
+
+In `highlevel_live` mode, the provider adapter uses the official HighLevel REST API to create or reconcile a Contact and its linked Opportunity in the configured service pipeline. Application-owned submission and correlation fields bind the remote records to the original request. The adapter reads the records back and verifies their identity, location, pipeline, stage, and Contact relationship before treating the operation as complete.
+
+![Synthetic Contact created in GoHighLevel](docs/assets/readme/03_highlevel_live_contact.png)
+
+*A synthetic Contact created by the integration carries the stable submission and correlation identities used during replay and recovery.*
+
+![Linked Opportunity in the GoHighLevel service pipeline](docs/assets/readme/04_highlevel_opportunity_new_lead.png)
+
+*The linked Opportunity is placed in the HVAC Service Pipeline at New Lead. Later follow-up and booking events advance its desired stage through a separate reconciliation worker.*
+
 ## Recovery is part of the design
 
 Each logical enquiry has a stable identity and normalized fingerprint. Before repeating a CRM write, the application checks whether the intended Contact or Opportunity already exists. This matters when a remote write succeeds but its response is lost.
@@ -120,6 +132,10 @@ The [written demo guide](docs/guided-demo.md) explains the scenarios, expected e
 ## Business reporting
 
 FastAPI produces a minimized 16-field daily aggregate without customer names, contact details, messages, or AI summaries. n8n sends it to Make, which creates or updates the matching Google Sheets row using a deterministic report key. Reporting failures cannot undo intake, booking, or CRM recovery.
+
+![Make reporting scenario](docs/assets/readme/09_make_reporting_scenario.png)
+
+*The Make scenario checks the deterministic report key, creates a new daily row when needed, or updates the existing row without duplicating the report.*
 
 ![Aggregate HVAC management dashboard](docs/assets/readme/10_management_dashboard.png)
 
