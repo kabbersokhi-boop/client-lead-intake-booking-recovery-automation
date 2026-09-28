@@ -14,8 +14,8 @@ for ((index = 1; index <= $#; index += 1)); do
   fi
 done
 
-if [[ ${1-} != "run" || ! $run_id =~ ^baseline-v2-(development|held_out)$ ]]; then
-  echo "Usage: bash scripts/ai-evaluation-via-n8n.sh run --split development|held_out --run-id baseline-v2-development|baseline-v2-held_out" >&2
+if [[ ${1-} != "run" || ! $run_id =~ ^(baseline|lightning)-v2-(development|held_out)$ ]]; then
+  echo "Usage: bash scripts/ai-evaluation-via-n8n.sh run [--profile baseline|lightning] --split development|held_out --run-id <profile>-v2-<split>" >&2
   exit 2
 fi
 
@@ -33,6 +33,7 @@ docker cp "$repo_dir/n8n/lead-intake.json" "$container:$remote_root/n8n/lead-int
 docker cp "$repo_dir/n8n/evaluation/dataset-v1.json" "$container:$remote_root/n8n/evaluation/dataset-v1.json"
 docker cp "$repo_dir/n8n/evaluation/dataset-v2-revision.json" "$container:$remote_root/n8n/evaluation/dataset-v2-revision.json"
 docker cp "$repo_dir/n8n/evaluation/rubric-v2.json" "$container:$remote_root/n8n/evaluation/rubric-v2.json"
+docker cp "$repo_dir/n8n/evaluation/lightning-profile.json" "$container:$remote_root/n8n/evaluation/lightning-profile.json"
 
 local_before=
 if [[ -e $local_ledger ]]; then

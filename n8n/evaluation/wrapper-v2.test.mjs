@@ -22,7 +22,8 @@ function fixture() {
   for (const file of [
     'scripts/ai-evaluation-via-n8n.sh', 'scripts/ai-evaluation.mjs', 'scripts/ai-evaluation-v2.mjs',
     'n8n/lead-intake.json', 'n8n/evaluation/dataset-v1.json',
-    'n8n/evaluation/dataset-v2-revision.json', 'n8n/evaluation/rubric-v2.json'
+    'n8n/evaluation/dataset-v2-revision.json', 'n8n/evaluation/rubric-v2.json',
+    'n8n/evaluation/lightning-profile.json'
   ]) fs.copyFileSync(path.join(ROOT, file), path.join(repo, file));
   const dockerMock = `#!/usr/bin/env node
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');

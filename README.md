@@ -6,6 +6,8 @@ An HVAC enquiry is useful only if the business can act on it. This system accept
 
 ## Try the guided demo
 
+Current implementation status, measured AI limitations, and remaining acceptance work: [project handover](handover.md).
+
 From a fresh checkout, the interview-safe demo needs Docker with Compose, `curl`, and
 `openssl`; it does not need HighLevel, NVIDIA, Make, email, or other external credentials:
 

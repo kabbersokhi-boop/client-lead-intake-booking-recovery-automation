@@ -1,0 +1,12 @@
+{
+  "id": "lightning-v2",
+  "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+  "timeout_ms": 18000,
+  "inference_settings": {
+    "temperature": 0,
+    "max_tokens": 512,
+    "reasoning_budget": 0,
+    "stream": false,
+    "response_format": { "type": "json_object" }
+  }
+}

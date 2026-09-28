@@ -1,5 +1,9 @@
 # Milestone 2A: reproducible AI extraction evaluation
 
+## Latest addendum — provider recovery (2026-09-28)
+
+The original baseline below remains partial and unchanged. A separately identified Lightning profile has now completed all 60 synthetic cases; it is not a repaired or relabeled baseline. See [provider recovery](provider-recovery.md), [candidate measurements](milestone-2a-results-lightning.md), and the root [handover](../../handover.md). The candidate produced 56 schema-valid outputs but only 15/60 strict all-field successes. Existing live workflows were not switched. Further feature milestones are deferred; only presentation and end-to-end acceptance remain in scope.
+
 ## Correction pass (2026-09-28)
 
 **Status: partial.** The compatibility, durability, scoring-integrity, and reporting corrections are implemented and committed. The real-provider v2 baseline is resumable but incomplete: two bounded invocation segments each stopped at the explicit circuit breaker after three consecutive 18-second timeouts. Development is 6/40 settled; held-out is gated and has 0/20 requests. Do not interpret this as a completed evaluation.

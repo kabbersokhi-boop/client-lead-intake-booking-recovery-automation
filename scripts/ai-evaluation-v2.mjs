@@ -176,7 +176,7 @@ function parseAndValidateLedger({ text, dataset, expectedManifest = null, expect
   if (expectedSplit && header.split !== expectedSplit) throw new Error('Ledger split mismatch.');
   if (expectedRunId && header.run_id !== expectedRunId) throw new Error('Ledger run ID mismatch.');
   if (header.split !== 'development' && header.split !== 'held_out') throw new Error('Ledger has an invalid split.');
-  if (header.run_id !== `baseline-v2-${header.split}`) throw new Error('Ledger run ID does not match split.');
+  if (![ `baseline-v2-${header.split}`, `lightning-v2-${header.split}` ].includes(header.run_id)) throw new Error('Ledger run ID does not match split.');
   if (manifest.dataset_hash !== dataset.datasetHash) throw new Error('Ledger dataset does not match frozen dataset v2.');
   const caseMap = new Map(dataset.dataset.cases.map((item) => [item.id, item]));
   const reservations = new Map();
@@ -332,6 +332,8 @@ function runReportSection(split, validated) {
 
 function formatReport(validatedRuns, datasetInfo) {
   const reports = [];
+  const profileName = validatedRuns[0]?.header.run_id.startsWith('lightning-v2-') ? 'lightning' : 'baseline';
+  const runPrefix = `${profileName}-v2`;
   const first = validatedRuns[0]?.manifest;
   if (validatedRuns.some((run) => run.manifest.experiment_id !== first?.experiment_id)) throw new Error('Cannot report mixed experiment configurations.');
   const totalDatasetCases = datasetInfo.dataset.cases.length;
@@ -369,10 +371,10 @@ function formatReport(validatedRuns, datasetInfo) {
     '```bash',
     'node scripts/ai-evaluation-v2.mjs validate',
     'npm run test:evaluation',
-    'bash scripts/ai-evaluation-via-n8n.sh run --split development --run-id baseline-v2-development',
-    'bash scripts/ai-evaluation-via-n8n.sh run --split development --run-id baseline-v2-development --ack-circuit-reset  # only after diagnosing a transient failure',
-    'bash scripts/ai-evaluation-via-n8n.sh run --split held_out --run-id baseline-v2-held_out  # only after all development cases settle',
-    'node scripts/ai-evaluation-v2.mjs report',
+    `bash scripts/ai-evaluation-via-n8n.sh run --profile ${profileName} --split development --run-id ${runPrefix}-development`,
+    `bash scripts/ai-evaluation-via-n8n.sh run --profile ${profileName} --split development --run-id ${runPrefix}-development --ack-circuit-reset  # only after diagnosing a transient failure`,
+    `bash scripts/ai-evaluation-via-n8n.sh run --profile ${profileName} --split held_out --run-id ${runPrefix}-held_out  # only after all development cases settle`,
+    `node scripts/ai-evaluation-v2.mjs report --profile ${profileName}`,
     '```', '',
     'The circuit breaker opens after three consecutive timeout/provider failures. It stops new reservations; settled and uncertain case IDs are never retried. `--ack-circuit-reset` applies only to unreserved cases and should be used only after an operator diagnoses a transient service issue. Held-out calls are gated on all development cases having settled outcomes.', '');
   return reports.join('\n');
@@ -393,7 +395,6 @@ function validateRecordsForReport(datasetInfo, runIds) {
       model: recorded?.model,
       endpoint: recorded?.endpoint_identity,
       settings: recorded?.inference_settings,
-      executionPolicy: recorded?.execution_policy,
       executionPolicy: recorded?.execution_policy,
       timeoutMs: recorded?.timeout_ms,
       datasetHash: datasetInfo.datasetHash,
@@ -434,13 +435,13 @@ function loadRequestBudget() {
       const attempted = rows.filter((row) => row.request_attempted === true).length;
       if (attempted !== 13) throw new Error('Historical v1 request ledger no longer has its original 13 observations; refusing budget calculation.');
       observedLegacyCount = attempted;
-    } else if (name.startsWith('baseline-v2-')) {
+    } else if (name.startsWith('baseline-v2-') || name.startsWith('lightning-v2-') || name === 'provider-diagnostics.jsonl') {
       const rows = text.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
-      count += rows.slice(1).filter((row) => row.kind === 'reservation').length;
+      count += rows.filter((row) => row.kind === 'reservation').length;
     }
   }
   // The original 13 observations remain charged even when evaluation runs only from the protected volume.
-  return Math.max(count + observedLegacyCount, 13);
+  return count + Math.max(observedLegacyCount, 13);
 }
 
 function responseRecord(responseJson, item, input, contract, manifest, context, latencyMs) {
@@ -521,24 +522,30 @@ async function oneAttempt({ file, manifest, runId, split, item, key, endpoint, t
   return result;
 }
 
-async function runLive(split, runId) {
+function evaluationProfile(name, config, contract) {
+  if (name === 'baseline') return {
+    id: 'baseline-v2', model:config.model, timeout_ms:config.timeout,
+    inference_settings:{temperature:contract.settings.temperature,max_tokens:contract.settings.max_tokens,
+      reasoning_effort:contract.settings.reasoning_effort,response_format:contract.settings.response_format},
+  };
+  if (name !== 'lightning') throw new Error('Unknown evaluation profile');
+  return JSON.parse(read(path.join(ROOT,'n8n/evaluation/lightning-profile.json')));
+}
+
+async function runLive(split, runId, profileName = 'baseline') {
   const data = loadDataset();
   const contract = readContract();
   const config = loadApiConfig(contract);
-  const settings = {
-    temperature: contract.settings.temperature,
-    max_tokens: contract.settings.max_tokens,
-    reasoning_effort: contract.settings.reasoning_effort,
-    response_format: contract.settings.response_format
-  };
+  const profile = evaluationProfile(profileName, config, contract);
+  const settings = profile.inference_settings;
   const manifest = makeManifest({
-    provider: 'nvidia_nim', model: config.model, endpoint: config.endpoint,
-    settings, timeoutMs: config.timeout, datasetHash: data.datasetHash,
+    provider: 'nvidia_nim', model: profile.model, endpoint: config.endpoint,
+    settings, timeoutMs: profile.timeout_ms, datasetHash: data.datasetHash,
     rubricHash: sha256(read(RUBRIC)), contract
   });
-  if (!['development', 'held_out'].includes(split) || runId !== `baseline-v2-${split}`) throw new Error('Run ID must be baseline-v2-development or baseline-v2-held_out and match split.');
+  if (!['development', 'held_out'].includes(split) || runId !== `${profile.id}-${split}`) throw new Error('Run ID must match the selected profile and split.');
   if (split === 'held_out') {
-    const devFile = path.join(RUN_DIR, 'baseline-v2-development.jsonl');
+    const devFile = path.join(RUN_DIR, `${profile.id}-development.jsonl`);
     if (!fs.existsSync(devFile)) throw new Error('Held-out evaluation requires a completed development run.');
     const dev = parseAndValidateLedger({ text: read(devFile), dataset: data, expectedManifest: manifest, expectedSplit: 'development' });
     const expectedN = data.dataset.cases.filter((i) => i.split === 'development').length;
@@ -561,7 +568,7 @@ async function runLive(split, runId) {
     const settlements = validated.attempts.map((a) => a.settlement).filter(Boolean);
     let consecutiveServiceFailures = initialCircuitStreak(settlements, process.argv.includes('--ack-circuit-reset'));
     for (const item of pending) {
-      const outcome = await budgetedAttempt({ used: loadRequestBudget(), file, manifest, runId, split, item, key: config.key, endpoint: config.endpoint, timeout: config.timeout, contract });
+      const outcome = await budgetedAttempt({ used: loadRequestBudget(), file, manifest, runId, split, item, key: config.key, endpoint: config.endpoint, timeout: profile.timeout_ms, contract });
       process.stdout.write(`${item.id}: ${outcome.outcome}\n`);
       const confirmedConfiguration = [400, 401, 403, 404, 422].includes(outcome.http_status);
       if (confirmedConfiguration) {
@@ -596,29 +603,32 @@ function validateCommand() {
   process.stdout.write(`effective_dataset_sha256=${data.datasetHash}\nrubric_sha256=${sha256(read(RUBRIC))}\nprompt_sha256=${contract.promptHash}\ncontract_sha256=${contract.contractHash}\n`);
 }
 
-function reportCommand() {
+function reportCommand(profileName = 'baseline') {
   const data = loadDataset();
-  const runs = validateRecordsForReport(data, ['baseline-v2-development', 'baseline-v2-held_out']);
+  if (!['baseline','lightning'].includes(profileName)) throw new Error('Unknown evaluation profile');
+  const prefix = profileName === 'baseline' ? 'baseline-v2' : 'lightning-v2';
+  const runs = validateRecordsForReport(data, [`${prefix}-development`, `${prefix}-held_out`]);
   const text = formatReport(runs, data);
-  const output = path.join(ROOT, 'docs/reviews/milestone-2a-results-v2.md');
+  const output = path.join(ROOT, profileName === 'baseline' ? 'docs/reviews/milestone-2a-results-v2.md' : 'docs/reviews/milestone-2a-results-lightning.md');
   fs.writeFileSync(output, text);
   process.stdout.write(`Wrote ${path.relative(ROOT, output)}\n`);
 }
 
 export {
   acquireLock, assertRequestBudget, budgetedAttempt, deriveStats, endpointIdentity, eventContext, formatReport, gradeCase, initialCircuitStreak,
-  loadDataset, makeManifest, manifestHash, oneAttempt, parseAndValidateLedger,
+  loadDataset, loadRequestBudget, evaluationProfile, makeManifest, manifestHash, oneAttempt, parseAndValidateLedger,
   pendingCases, responseRecord, stableJson, validateRecordsForReport
 };
 
 const [command, ...args] = process.argv.slice(2);
+const profileName = args.includes('--profile') ? args[args.indexOf('--profile') + 1] : 'baseline';
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) try {
   if (command === 'validate') validateCommand();
   else if (command === 'run') {
     const split = args[args.indexOf('--split') + 1];
     const runId = args[args.indexOf('--run-id') + 1];
-    await runLive(split, runId);
-  } else if (command === 'report') reportCommand();
+    await runLive(split, runId, profileName);
+  } else if (command === 'report') reportCommand(profileName);
   else throw new Error('Commands: validate | run --split development|held_out --run-id baseline-v2-development|baseline-v2-held_out | report');
 } catch (error) {
   process.stderr.write(`${error.message}\n`);
