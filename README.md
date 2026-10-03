@@ -2,7 +2,23 @@
 
 [![Backend CI](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/actions/workflows/ci.yml/badge.svg)](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/actions/workflows/ci.yml)
 
-**A customer enquiry becomes a verified CRM record, a saved appointment, and a refreshed management report—with durable recovery when an API fails.**
+**Keep a customer enquiry traceable from intake to booking—even when an integration fails.**
+
+## The business problem
+
+An HVAC customer asks for help with a furnace. The office needs to capture the request, follow up, arrange an appointment, and keep the CRM and daily report aligned. That customer journey crosses several tools, but the business needs one clear answer: **what happened to this enquiry, and what still needs attention?**
+
+An integration failure makes that answer harder. The CRM may save a record but lose its response; a rate limit may delay the write; a repeated submission may create another copy. Retrying blindly risks duplicates, while treating an unverified response as success can leave the office with incomplete or misleading records.
+
+This project connects the handoffs: retain the enquiry first, verify the CRM result, track follow-up and local booking, and refresh the management report without duplicating it. Failed or ambiguous work stays visible for safe retry or human review rather than disappearing behind a webhook response.
+
+### What the business can inspect
+
+- **Front office:** the original request, its linked CRM records, follow-up state, and saved local appointment.
+- **Operations:** what failed, what was retried, and what still needs review—with the original attempt history intact.
+- **Management:** a refreshed daily aggregate, without copying customer messages or contact details into the reporting sheet.
+
+The portfolio demonstrates these capabilities with a synthetic customer and verified system readbacks. It does **not** claim measured revenue recovery, faster response times, or production customer outcomes.
 
 Built with **n8n · FastAPI · PostgreSQL · NVIDIA NIM · GoHighLevel · Make · Google Sheets**.
 
@@ -29,11 +45,11 @@ The recording uses a synthetic customer with **live GoHighLevel, Make, and Googl
 
 [Screenshot tour and recording evidence](docs/portfolio-demo.md) · [Run the credential-free local demo](#guided-local-demo) · [Inspect retry and error recovery](#recovery-is-part-of-the-design) · [Architecture](docs/architecture.md)
 
-## Why this system exists
+## The story behind the demo
 
-Service businesses need more than a webhook that works once. This system captures enquiries, enriches them with AI, creates and updates CRM records, manages follow-up and local booking, and makes incomplete work inspectable and recoverable.
+One synthetic furnace-service enquiry moves from the customer form to a verified live GoHighLevel Contact and Opportunity. The office then saves a local appointment; the matching CRM Opportunity reaches **Appointment Booked**. A daily report passes through n8n and Make into Google Sheets, then a second run refreshes the same report row instead of adding another copy.
 
-The project focuses on a problem that simple webhook automations usually ignore: an HTTP request can time out even after the remote system has saved the record. Retrying blindly can create duplicate contacts, opportunities, appointments, or messages. This system persists every intended operation, assigns stable identities, checks the remote result, and retries only when it is safe.
+The successful journey and the recovery evidence answer different business questions. The video shows **where the enquiry went and how its booking and reporting states were verified**. The retained fault tests show **what happens when a handoff fails**: work survives in PostgreSQL, retries respect provider limits, remote records are reconciled before another create, and unresolved cases stop for review. A green workflow execution is useful evidence—not a substitute for checking the business result.
 
 ## What this project demonstrates
 
