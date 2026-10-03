@@ -28,7 +28,7 @@ Built with **n8n · FastAPI · PostgreSQL · NVIDIA NIM · GoHighLevel · Make �
 
 *Short looping preview above; click for the complete recording.*
 
-**[Watch / download the full demo — 2:27, 1080p MP4](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/raw/refs/heads/main/docs/assets/video/HVAC-End-to-End-Demo.mp4)** · Silent, ready for voiceover. This is the single edited portfolio video, not a collection of raw recordings.
+**[Watch / download the full demo — 2:27, 1080p MP4](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/raw/refs/heads/main/docs/assets/video/HVAC-End-to-End-Demo.mp4)** · The complete journey from customer enquiry to booking and reporting.
 
 The recording uses a synthetic customer with **live GoHighLevel, Make, and Google Sheets**. Booking is local; email is captured in Mailpit. Recovery evidence is presented separately below rather than staged into the video.
 
