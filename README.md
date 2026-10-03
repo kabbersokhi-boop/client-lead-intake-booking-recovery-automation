@@ -143,7 +143,7 @@ AI enrichment is advisory. It does not decide customer identity, consent, pricin
 
 The repository contains a frozen 60-case synthetic evaluation set, a versioned rubric, schema checks, durable request accounting, a request cap, and development/held-out result separation.
 
-During evaluation, the original `openai/gpt-oss-20b` endpoint repeatedly timed out. A separately versioned NVIDIA Nemotron Lightning profile completed all 60 cases:
+During evaluation, the original `openai/gpt-oss-20b` endpoint repeatedly timed out. A separately versioned NVIDIA Nemotron Lightning profile recorded attempts for all 60 cases, including invalid responses and timeouts:
 
 | Result | Development | Held out | Total |
 |---|---:|---:|---:|
@@ -213,7 +213,7 @@ The previously verified engineering baseline includes:
 - real Chrome coverage for the five guided demo scenarios from Milestone 1;
 - retained evidence from synthetic HighLevel, NVIDIA, Mailpit, Make, and Google Sheets exercises.
 
-The [new recorded demo evidence](docs/portfolio-demo.md#verification-and-boundaries) separately confirms successful intake, booking, reporting, and reporting-refresh executions, verified live CRM stage synchronization, and Sheets readback. Screenshots are full-HD frames from the privacy-reviewed final video; older recovery screenshots remain clearly identified as historical evidence.
+The [recorded demo evidence](docs/portfolio-demo.md#verification-and-boundaries) separately confirms successful intake, booking, reporting, and reporting-refresh executions, verified live CRM stage synchronization, and Sheets readback. Recorded-journey screenshots are full-HD frames from the privacy-reviewed final video; the native GHL workflow and older recovery screenshots are separately labelled retained evidence.
 
 The test suites cover validation, database transactions, concurrent workers, lease expiry, retry timing, rate limits, replay conflicts, ambiguous CRM identity, lost acknowledgements, booking conflicts, stage synchronization, reporting minimization, and browser response validation.
 
