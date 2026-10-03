@@ -1,6 +1,37 @@
-# Reliable AI Lead Intake, Booking, and CRM Recovery
+# HVAC Lead Automation — Intake, Booking & Recovery
 
-An end-to-end automation system for service businesses that captures customer enquiries, enriches them with AI, creates and updates CRM records, manages follow-up and booking, and recovers safely when external services fail.
+[![Backend CI](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/actions/workflows/ci.yml/badge.svg)](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/actions/workflows/ci.yml)
+
+**A customer enquiry becomes a verified CRM record, a saved appointment, and a refreshed management report—with durable recovery when an API fails.**
+
+Built with **n8n · FastAPI · PostgreSQL · NVIDIA NIM · GoHighLevel · Make · Google Sheets**.
+
+## Watch the complete demo
+
+[![Preview of the HVAC automation demo: enquiry, n8n, live CRM, Make, and dashboard](docs/assets/portfolio/demo-preview.gif)](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/raw/refs/heads/main/docs/assets/video/HVAC-End-to-End-Demo.mp4)
+
+*Short looping preview above; click for the complete recording.*
+
+**[Watch / download the full demo — 2:27, 1080p MP4](https://github.com/kabbersokhi-boop/client-lead-intake-booking-recovery-automation/raw/refs/heads/main/docs/assets/video/HVAC-End-to-End-Demo.mp4)** · Silent, ready for voiceover. This is the single edited portfolio video, not a collection of raw recordings.
+
+The recording uses a synthetic customer with **live GoHighLevel, Make, and Google Sheets**. Booking is local; email is captured in Mailpit. Recovery evidence is presented separately below rather than staged into the video.
+
+### The demo in six quick steps
+
+| Time | What happens | What to look for |
+|---|---|---|
+| 0:05 | Type and submit a furnace-service enquiry | The actual customer-facing form and verified acceptance |
+| 0:24 | Inspect the successful n8n intake | Validation, optional AI enrichment, persistence, and response verification |
+| 0:38 | Open the live GoHighLevel Contact | The synthetic customer and linked Opportunity creation audit |
+| 0:49 | Save an appointment and verify the lifecycle | Successful booking workflow, **Appointment Booked** in live CRM, local confirmation, and completed job |
+| 1:24 | Run reporting through n8n and Make | Successful **New Report** branch and a fresh daily row in Sheets |
+| 1:55 | Refresh the same report | Successful **Existing Report** branch, updated timestamp, no duplicate row, and refreshed dashboard |
+
+[Screenshot tour and recording evidence](docs/portfolio-demo.md) · [Run the credential-free local demo](#guided-local-demo) · [Inspect retry and error recovery](#recovery-is-part-of-the-design) · [Architecture](docs/architecture.md)
+
+## Why this system exists
+
+Service businesses need more than a webhook that works once. This system captures enquiries, enriches them with AI, creates and updates CRM records, manages follow-up and local booking, and makes incomplete work inspectable and recoverable.
 
 The project focuses on a problem that simple webhook automations usually ignore: an HTTP request can time out even after the remote system has saved the record. Retrying blindly can create duplicate contacts, opportunities, appointments, or messages. This system persists every intended operation, assigns stable identities, checks the remote result, and retries only when it is safe.
 
@@ -47,25 +78,15 @@ flowchart LR
 8. Recovery workers retry incomplete work using persisted schedules and attempt history.
 9. Aggregate daily results can be sent through Make to Google Sheets.
 
-![Customer request accepted and verified](docs/assets/readme/01_website_saved_request.png)
-
-*The customer receives a verified result only after the application accepts the request. Technical trace details remain available for investigation.*
-
-![Successful n8n intake execution](docs/assets/readme/02_n8n_intake_success.png)
-
-*The intake workflow separates input validation, AI extraction, schema validation, durable persistence, and response verification.*
+The [visual walkthrough](docs/portfolio-demo.md#1-customer-enquiry-and-verified-intake) shows the real form, successful n8n execution, appointment result, and persisted job—not just a workflow canvas.
 
 ## GoHighLevel CRM integration
 
 In `highlevel_live` mode, the provider adapter uses the official HighLevel REST API to create or reconcile a Contact and its linked Opportunity in the configured service pipeline. Application-owned submission and correlation fields bind the remote records to the original request. The adapter reads the records back and verifies their identity, location, pipeline, stage, and Contact relationship before treating the operation as complete.
 
-![Synthetic Contact created in GoHighLevel](docs/assets/readme/03_highlevel_live_contact.png)
+![Live GoHighLevel Opportunity at Appointment Booked](docs/assets/portfolio/06-live-pipeline.png)
 
-*A synthetic Contact created by the integration carries the stable submission and correlation identities used during replay and recovery.*
-
-![Linked Opportunity in the GoHighLevel service pipeline](docs/assets/readme/04_highlevel_opportunity_new_lead.png)
-
-*The linked Opportunity is placed in the HVAC Service Pipeline at New Lead. Later follow-up and booking events advance its desired stage through a separate reconciliation worker.*
+*The recorded customer journey finishes with the linked Opportunity at Appointment Booked. Contact creation and the booking workflow are shown in the [screenshot tour](docs/portfolio-demo.md#2-live-crm-and-booking).*
 
 ## Recovery is part of the design
 
@@ -84,9 +105,29 @@ The recovery layer includes:
 
 The repository includes deterministic scenarios for normal intake, duplicate delivery, unavailable AI, CRM rate limiting, and a lost acknowledgement after the CRM has already committed the write.
 
+### An error is evidence—not something to hide
+
+| Failure boundary | Recovery decision |
+|---|---|
+| CRM returns HTTP 429 | Persist the failure and retry due time; respect `Retry-After` before another eligible attempt |
+| A remote write succeeds but its reply is lost | Look up and verify the existing record before considering another create |
+| n8n or a worker restarts | Resume from PostgreSQL jobs and bounded leases, not workflow memory |
+| Identity is ambiguous or retries are exhausted | Stop in `needs_review` with the original attempt history intact |
+
+<details>
+<summary><strong>See the original failed n8n execution: HTTP 429, execution 283</strong></summary>
+
+![Retained controlled HTTP 429 diagnostic failure in n8n](docs/assets/readme/07_controlled_429_failure_execution_283.png)
+
+This is a controlled **local fault-injection diagnostic**, not a real HighLevel outage. The intentionally unsafe diagnostic fails; the durable recovery path subsequently verifies completion. The original failed execution is retained.
+
+</details>
+
 ![Durable retry and recovery history](docs/assets/readme/08_durable_recovery_283_to_294.png)
 
-*A retained job records the initial HTTP 429 and a later verified completion. The failed attempt remains visible instead of being rewritten as a success.*
+*The same retained job shows attempt 1 failing with HTTP 429 (`Retry-After: 10`, execution 283) and attempt 2 completing (execution 294). This historical screenshot is preserved, not relabelled as part of the new live demo.*
+
+The historical batch recovered **12/12 scoped leads with zero missing and zero duplicate submission IDs**. The [verification report](docs/phase-3-verification.md) also retains later corrections and stronger at-write retry evidence. The [guided demo](docs/guided-demo.md) provides repeatable 429 and lost-acknowledgement scenarios; the [operator runbook](docs/phase-3-runbook.md) explains retry, review, and credential-blocked states.
 
 ## AI extraction and evaluation
 
@@ -127,19 +168,15 @@ Open **http://localhost:28000/demo.html** and run any of the five scenarios. Eac
 
 The [written demo guide](docs/guided-demo.md) explains the scenarios, expected evidence, reset behavior, and troubleshooting.
 
-<!-- Add the recorded end-to-end video here after it is uploaded. -->
-
 ## Business reporting
 
 FastAPI produces a minimized 16-field daily aggregate without customer names, contact details, messages, or AI summaries. n8n sends it to Make, which creates or updates the matching Google Sheets row using a deterministic report key. Reporting failures cannot undo intake, booking, or CRM recovery.
 
-![Make reporting scenario](docs/assets/readme/09_make_reporting_scenario.png)
+The video demonstrates **both branches**: a first run adds the report, then a second run updates the same report key. Readback confirmed one report row, a changed `Generated At` value, and no duplicate row. See the [Make and Sheets evidence](docs/portfolio-demo.md#4-make-and-google-sheets-create-then-update).
 
-*The Make scenario checks the deterministic report key, creates a new daily row when needed, or updates the existing row without duplicating the report.*
+![Management dashboard after the recorded Make refresh](docs/assets/portfolio/12-management-dashboard.png)
 
-![Aggregate HVAC management dashboard](docs/assets/readme/10_management_dashboard.png)
-
-*The management view summarizes service demand, appointments, follow-ups, review volume, and open recovery incidents.*
+*The latest recorded report shows one request, one appointment, and one follow-up. The incident total includes retained historical diagnostics; it is not a failure count for this customer journey.*
 
 ## Technology
 
@@ -158,7 +195,7 @@ FastAPI produces a minimized 16-field daily aggregate without customer names, co
 
 ## Verification evidence
 
-The current verified baseline includes:
+The previously verified engineering baseline includes:
 
 - **197** Python/PostgreSQL tests;
 - **33** browser and helper tests;
@@ -168,6 +205,8 @@ The current verified baseline includes:
 - real Chrome coverage for the five guided demo scenarios from Milestone 1;
 - retained evidence from synthetic HighLevel, NVIDIA, Mailpit, Make, and Google Sheets exercises.
 
+The [new recorded demo evidence](docs/portfolio-demo.md#verification-and-boundaries) separately confirms successful intake, booking, reporting, and reporting-refresh executions, verified live CRM stage synchronization, and Sheets readback. Screenshots are full-HD frames from the privacy-reviewed final video; older recovery screenshots remain clearly identified as historical evidence.
+
 The test suites cover validation, database transactions, concurrent workers, lease expiry, retry timing, rate limits, replay conflicts, ambiguous CRM identity, lost acknowledgements, booking conflicts, stage synchronization, reporting minimization, and browser response validation.
 
 ```bash
@@ -175,6 +214,7 @@ npm ci
 npm run test:browser
 npm run test:workflow
 npm run test:evaluation
+node scripts/verify_portfolio.mjs
 ./scripts/verify_phase3.sh
 ```
 
@@ -191,6 +231,8 @@ n8n/                         Sanitized workflow exports
 n8n/evaluation/              Frozen AI datasets, rubrics, and evaluator tests
 scripts/                     Demo, verification, diagnostics, and evaluation tools
 docs/                        Architecture, runbooks, reports, and retained evidence
+docs/assets/video/           Single edited end-to-end portfolio video
+docs/assets/portfolio/       Full-HD screenshots and reproducible frame manifest
 ```
 
 Start with the [architecture notes](docs/architecture.md), [guided demo](docs/guided-demo.md), [recovery runbook](docs/phase-3-runbook.md), and [project handover](handover.md).

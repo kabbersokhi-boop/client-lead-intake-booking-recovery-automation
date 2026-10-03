@@ -1,0 +1,55 @@
+{
+  "captured_on": "2026-10-03",
+  "video": {
+    "path": "docs/assets/video/HVAC-End-to-End-Demo.mp4",
+    "sha256": "d6c49440b619c1b2c0dc4851d92fe69172ccb46e14474c91c1c6c58725ffaee0",
+    "bytes": 8826722,
+    "duration_seconds": 147.233333,
+    "width": 1920,
+    "height": 1080,
+    "codec": "h264",
+    "audio": false,
+    "chapters": 18
+  },
+  "n8n_executions": [
+    {"operation": "intake", "id": "63187", "verified_status": "success"},
+    {"operation": "booking", "id": "63283", "verified_status": "success"},
+    {"operation": "daily_report", "id": "63339", "verified_status": "success"},
+    {"operation": "report_refresh", "id": "63370", "verified_status": "success"}
+  ],
+  "customer_journey": {
+    "data": "synthetic",
+    "crm_mode": "highlevel_live",
+    "crm_job": "completed_in_one_attempt",
+    "crm_stage": "appointment_booked",
+    "stage_sync": "completed_and_verified",
+    "local_appointment_count": 1,
+    "confirmation": "accepted_by_development_smtp",
+    "linked_incidents": 0
+  },
+  "reporting": {
+    "destinations": "live Make and Google Sheets",
+    "report_key": "hvac-daily:2026-10-02",
+    "business_timezone": "America/Vancouver",
+    "tab": "Daily Reports",
+    "row": 4,
+    "first_generated_at": "2026-10-03T03:28:56.095350Z",
+    "refreshed_generated_at": "2026-10-03T03:30:59.299076Z",
+    "leads": 1,
+    "appointments": 1,
+    "follow_ups": 1,
+    "duplicate_report_rows": 0,
+    "proof": "Connector range readback after both Make runs; existing row updated and following rows blank"
+  },
+  "privacy": {
+    "capture": "browser page contents only, no desktop or browser chrome",
+    "make_private_webhook_label": "masked",
+    "raw_recordings_and_authentication": "not published"
+  },
+  "limits": [
+    "Local booking does not reserve external calendar capacity",
+    "Mailpit acceptance is not production email delivery",
+    "Reporting is a daily aggregate, not a customer-detail export",
+    "Recovery screenshots are separately labelled historical local fault-injection evidence"
+  ]
+}

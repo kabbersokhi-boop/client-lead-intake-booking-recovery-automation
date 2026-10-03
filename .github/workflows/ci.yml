@@ -43,5 +43,7 @@ jobs:
         working-directory: .
       - run: npm run test:evaluation
         working-directory: .
+      - run: node scripts/verify_portfolio.mjs
+        working-directory: .
       - run: bash -n scripts/ai-evaluation-via-n8n.sh
         working-directory: .
