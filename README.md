@@ -92,14 +92,9 @@ In `highlevel_live` mode, the provider adapter uses the official HighLevel REST 
 
 Alongside the API integration, the project includes a native **HVAC Lead Acknowledgement** workflow: **Opportunity enters New Lead → acknowledgement email**. It demonstrates CRM-side trigger configuration and a personalized message using `{{contact.first_name}}`.
 
-<details>
-<summary><strong>View the configured native GHL workflow (Draft)</strong></summary>
-
 ![Native GoHighLevel acknowledgement workflow with New Lead trigger and personalized email action, retained in Draft](docs/assets/readme/11_highlevel_native_ack_workflow.png)
 
 *Configured workflow, retained in **Draft**. This screenshot demonstrates the trigger and email-action setup—not a verified execution or delivered email. It is separate from the recorded n8n/Mailpit confirmation path and was not activated for the video.*
-
-</details>
 
 ## Recovery is part of the design
 
