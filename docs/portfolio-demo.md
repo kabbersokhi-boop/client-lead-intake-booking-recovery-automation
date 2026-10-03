@@ -29,7 +29,7 @@ The form assigns stable request identities. A valid enquiry is retained even whe
 
 ![Successful n8n intake execution and persisted API result](assets/portfolio/02-intake-success.png)
 
-The recorded intake execution is **63187**, status **success**. This run returned created/HTTP 201 with enriched AI state. Optional AI availability remains separate from durable acceptance.
+The recorded intake execution is **63187**, status **success**. This run returned HTTP 201 (`created`) with enriched AI state. Optional AI availability remains separate from durable acceptance.
 
 ### 2. Live CRM and booking
 
